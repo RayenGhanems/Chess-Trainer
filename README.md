@@ -101,8 +101,8 @@ The engine itself is bundled locally, so Stockfish does not depend on the intern
 If you want to put this on GitHub and let other people run it locally, the simplest install instructions are:
 
 ```bash
-git clone <your-repo-url>
-cd Chess
+git clone https://github.com/RayenGhanems/Chess-Trainer
+cd Chess Trainier
 python3 serve.py
 ```
 
