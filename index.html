@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Chess Trainer</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Local Chess Trainer</p>
+          <h1>Chess Trainer</h1>
+        </div>
+        <div class="hero-status" id="engine-status">Loading Stockfish...</div>
+      </header>
+
+      <main class="layout">
+        <section class="board-panel">
+          <div class="board-topline">
+            <div class="turn-pill" id="turn-pill">White to move</div>
+            <div class="score-box">
+              <span>Eval</span>
+              <strong id="score-value">--</strong>
+            </div>
+          </div>
+
+          <div class="board-wrap">
+            <div class="eval-bar" aria-hidden="true">
+              <div class="eval-bar-fill" id="eval-bar-fill"></div>
+            </div>
+            <div class="board-stage">
+              <svg class="board-overlay" id="board-overlay" viewBox="0 0 8 8" aria-hidden="true">
+                <defs>
+                  <marker id="best-arrow-head" markerWidth="0.5" markerHeight="0.5" refX="0.34" refY="0.2" orient="auto">
+                    <path d="M0,0 L0.4,0.2 L0,0.4 Z"></path>
+                  </marker>
+                </defs>
+              </svg>
+              <div class="end-overlay hidden" id="end-overlay" aria-live="polite"></div>
+              <div class="drag-layer" id="drag-layer" aria-hidden="true"></div>
+              <div class="board" id="board" aria-label="Chess board"></div>
+            </div>
+          </div>
+
+          <div class="insight-row">
+            <article class="insight-card">
+              <span class="insight-label">Move feedback</span>
+              <strong id="last-feedback">Waiting for the first move</strong>
+            </article>
+            <article class="insight-card">
+              <span class="insight-label">Engine suggestion</span>
+              <strong id="best-move">--</strong>
+            </article>
+          </div>
+
+          <div class="control-row">
+            <button type="button" id="first-btn">|&lt;</button>
+            <button type="button" id="back-btn">&lt;</button>
+            <button type="button" id="forward-btn">&gt;</button>
+            <button type="button" id="latest-btn">&gt;|</button>
+            <button type="button" id="flip-btn">Flip board</button>
+          </div>
+
+          <div class="settings-card">
+            <label>
+              Play as
+              <select id="player-color">
+                <option value="w">White</option>
+                <option value="b">Black</option>
+              </select>
+            </label>
+
+            <label class="depth-control">
+              Coach depth
+              <input type="range" id="depth-input" min="8" max="16" value="11">
+              <span id="depth-value">11</span>
+            </label>
+
+            <label class="delay-control">
+              Stockfish delay
+              <input type="range" id="reply-delay-input" min="0" max="5" step="0.5" value="1.5">
+              <span id="reply-delay-value">1.5s</span>
+            </label>
+
+            <label class="toggle-option">
+              <input type="checkbox" id="show-best-arrow" checked>
+              Show best move arrow
+            </label>
+
+            <button type="button" id="new-game-btn">New game</button>
+          </div>
+
+          <div class="status-card">
+            <div>
+              <span class="insight-label">Status</span>
+              <strong id="status-text">Ready</strong>
+            </div>
+            <div>
+              <span class="insight-label">Position</span>
+              <code id="fen-output">startpos</code>
+            </div>
+          </div>
+        </section>
+
+        <aside class="side-panel">
+          <section class="panel review-summary-panel hidden" id="review-summary-panel"></section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Variation tree</h2>
+              <span id="tree-summary">0 moves</span>
+            </div>
+            <div class="move-tree" id="move-tree"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Branch explorer</h2>
+              <span id="branch-summary">Current line</span>
+            </div>
+            <div class="branch-list" id="branch-list"></div>
+          </section>
+
+          <section class="panel note-panel">
+            <h2>How to use it</h2>
+            <p>Click or drag a piece to a highlighted square. Rewind with the arrows, then play a different move to create a branch.</p>
+            <p>Import a PGN or a Chess.com game link below to switch into review mode.</p>
+          </section>
+
+          <section class="panel note-panel">
+            <h2>Move key</h2>
+            <div class="move-key" id="move-key"></div>
+          </section>
+
+          <section class="panel import-panel">
+            <div class="panel-header">
+              <h2>Import a game</h2>
+              <span>Review mode</span>
+            </div>
+
+            <label class="import-field" for="import-url">
+              <span>Chess.com link</span>
+              <input
+                type="url"
+                id="import-url"
+                placeholder="https://www.chess.com/game/live/..."
+                autocomplete="off"
+                spellcheck="false"
+              >
+            </label>
+
+            <label class="import-field" for="import-pgn">
+              <span>PGN or copied game text</span>
+              <textarea
+                id="import-pgn"
+                rows="10"
+                placeholder="[Event &quot;...&quot;]&#10;1. e4 e5 2. Nf3 Nc6 ..."
+                spellcheck="false"
+              ></textarea>
+            </label>
+
+            <div class="import-actions">
+              <button type="button" id="import-game-btn">Import for review</button>
+            </div>
+
+            <p class="import-status" id="import-status">Paste PGN directly, or paste a Chess.com game link and import it here.</p>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <div class="promotion-modal hidden" id="promotion-modal" role="dialog" aria-modal="true" aria-labelledby="promotion-title">
+      <div class="promotion-card">
+        <h2 id="promotion-title">Choose promotion</h2>
+        <div class="promotion-options" id="promotion-options"></div>
+      </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
