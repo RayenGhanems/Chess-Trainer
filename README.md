@@ -12,6 +12,28 @@ The idea is:
 
 This project is intentionally lightweight. It is a browser app with one JavaScript file, one stylesheet, one HTML file, a tiny Python server, and a locally bundled Stockfish browser build.
 
+## Quick Start
+
+Clone the repo and run the local server:
+
+```bash
+git clone https://github.com/RayenGhanems/Chess-Trainer.git
+cd Chess-Trainer
+python3 serve.py
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000
+```
+
+If your system does not have `python3` as a command, try:
+
+```bash
+python serve.py
+```
+
 ## Why This Exists
 
 This project was built for players who want a study board more than an "engine battle" app.
@@ -82,6 +104,16 @@ This project is probably not the right fit if you want:
 
 There is no Python package install step and no JavaScript build step.
 
+You do not need to install any project-specific dependencies.
+
+That means:
+
+- no `pip install`
+- no `npm install`
+- no `yarn install`
+- no build command
+- Stockfish is already bundled in `vendor/stockfish/`
+
 This project currently uses:
 
 - Python standard library only for the local server
@@ -98,11 +130,11 @@ The engine itself is bundled locally, so Stockfish does not depend on the intern
 
 ## Install From GitHub
 
-If you want to put this on GitHub and let other people run it locally, the simplest install instructions are:
+If you want to run the GitHub version locally, use:
 
 ```bash
-git clone https://github.com/RayenGhanems/Chess-Trainer
-cd Chess Trainier
+git clone https://github.com/RayenGhanems/Chess-Trainer.git
+cd Chess-Trainer
 python3 serve.py
 ```
 
@@ -111,8 +143,6 @@ Then open:
 ```text
 http://127.0.0.1:8000
 ```
-
-If your GitHub repository folder name is not `Chess`, replace the `cd Chess` line with your actual folder name.
 
 ## Setup Notes
 
@@ -130,7 +160,9 @@ The only real setup requirement is that the machine can run:
 python3
 ```
 
-## Quick Start
+On systems where `python3` is not available, `python` may work instead.
+
+## Run From The Project Directory
 
 From the project directory:
 
