@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Review on Chess Trainer",
+  "version": "0.1.0",
+  "description": "Send completed Chess.com games into the local Chess Trainer review app.",
+  "permissions": [
+    "storage",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.chess.com/*",
+    "https://*.chess.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "Review on Chess Trainer"
+  },
+  "options_page": "options.html"
+}

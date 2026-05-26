@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Review on Chess Trainer Options</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #12130f;
+        --panel: rgba(29, 31, 25, 0.94);
+        --line: rgba(255, 245, 224, 0.1);
+        --line-strong: rgba(255, 245, 224, 0.16);
+        --ink: #f1e9db;
+        --ink-strong: #fff7ea;
+        --muted: #b4ab99;
+        --accent: #e0b477;
+        --accent-deep: #aa7845;
+        --shadow: 0 28px 64px rgba(0, 0, 0, 0.34);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        background:
+          radial-gradient(circle at top left, rgba(224, 180, 119, 0.2), transparent 30%),
+          radial-gradient(circle at bottom right, rgba(124, 165, 111, 0.14), transparent 28%),
+          linear-gradient(180deg, #1a1c17 0%, #11120f 100%);
+        color: var(--ink);
+        font: 16px/1.6 "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(620px, calc(100vw - 36px));
+        padding: 30px;
+        border-radius: 28px;
+        border: 1px solid var(--line);
+        background:
+          radial-gradient(circle at top right, rgba(224, 180, 119, 0.16), transparent 22%),
+          linear-gradient(180deg, rgba(34, 36, 29, 0.97), rgba(20, 21, 17, 0.98));
+        box-shadow: var(--shadow);
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--accent);
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        font-size: 0.74rem;
+        font-weight: 700;
+      }
+
+      h1 {
+        margin: 0;
+        color: var(--ink-strong);
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 0.96;
+        letter-spacing: -0.04em;
+        font-family: "Palatino Linotype", "Book Antiqua", serif;
+      }
+
+      .lede {
+        margin: 14px 0 0;
+        color: var(--muted);
+      }
+
+      .hero-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 18px 0 24px;
+      }
+
+      .hero-badges span {
+        display: inline-flex;
+        align-items: center;
+        min-height: 36px;
+        padding: 0 14px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+
+      label {
+        display: grid;
+        gap: 8px;
+        margin-top: 8px;
+        color: var(--ink-strong);
+        font-weight: 700;
+      }
+
+      input {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: rgba(9, 10, 8, 0.22);
+        color: var(--ink);
+        font: inherit;
+      }
+
+      button {
+        margin-top: 16px;
+        padding: 12px 18px;
+        border-radius: 16px;
+        border: 1px solid var(--line-strong);
+        background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+        color: #23190f;
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.24),
+          0 16px 28px rgba(0, 0, 0, 0.2);
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+      }
+
+      input:focus-visible,
+      button:focus-visible {
+        outline: 3px solid rgba(224, 180, 119, 0.26);
+        outline-offset: 1px;
+      }
+
+      .note {
+        margin: 18px 0 0;
+        padding: 14px 16px;
+        border-radius: 18px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--muted);
+      }
+
+      #status {
+        min-height: 1.5em;
+        margin: 14px 0 0;
+        color: var(--muted);
+      }
+
+      #status[data-state="success"] {
+        color: #78c46d;
+      }
+
+      #status[data-state="error"] {
+        color: #ef7f75;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Chess Trainer Extension</p>
+      <h1>Point the extension at your review desk.</h1>
+      <p class="lede">Choose which local or hosted Chess Trainer app the extension should open after it captures a finished Chess.com game.</p>
+      <div class="hero-badges" aria-hidden="true">
+        <span>Chess.com capture</span>
+        <span>One-click handoff</span>
+        <span>Local review board</span>
+      </div>
+      <label for="app-origin">
+        Review app origin
+        <input id="app-origin" type="url" placeholder="http://127.0.0.1:8000" autocomplete="off">
+      </label>
+      <button id="save" type="button">Save</button>
+      <p class="note">Example: keep `http://127.0.0.1:8000` while you run the local trainer, or switch to a deployed URL later without reinstalling the extension.</p>
+      <p id="status"></p>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "name": "chess-trainer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js && python3 -m unittest discover -s tests -q",
+    "test:js": "node --test tests/*.test.js",
+    "test:py": "python3 -m unittest discover -s tests -q"
+  }
+}

@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: chess-trainer
+    env: docker
+    plan: starter
+    healthCheckPath: /healthz
+    disk:
+      name: chess-trainer-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: CHESS_TRAINER_HOST
+        value: 0.0.0.0
+      - key: CHESS_TRAINER_DATA_DIR
+        value: /data
+      - key: PYTHONUNBUFFERED
+        value: "1"

@@ -1,168 +1,77 @@
 # Chess Trainer
 
-Small local chess trainer built around analysis, branching, and review rather than simply "playing an engine game".
+Local chess training app with:
 
-The idea is:
+- play against a bundled Stockfish engine
+- rewind and branch from any move
+- import finished games for review
+- one-click Chess.com handoff through a local Chrome extension
 
-- play against Stockfish if you want to train ideas
-- see live evaluation while you play
-- get move-by-move feedback
-- rewind easily and try another branch
-- import a finished game and review it with Stockfish
+This is still an MVP. It is good enough to hand to a friend for testing, but it is not a polished hosted product yet.
 
-This project is intentionally lightweight. It is a browser app with one JavaScript file, one stylesheet, one HTML file, a tiny Python server, and a locally bundled Stockfish browser build.
+## Current Stage
 
-## Quick Start
+What works well right now:
 
-Clone the repo and run the local server:
+- local play against Stockfish
+- move tree navigation and branching
+- PGN import for review
+- local cache of imported games in the browser
+- reopenable local review links such as `/game/chesscom/<id>`
+- Chrome extension handoff from completed Chess.com game pages
+- deployable single-instance web app with Docker / Render scaffolding
 
-```bash
-git clone https://github.com/RayenGhanems/Chess-Trainer.git
-cd Chess-Trainer
-python3 serve.py
-```
+What this is not yet:
 
-Then open:
+- not a true multi-user cloud product
+- not a Chrome Web Store extension
+- not an always-perfect Chess.com integration
+- not a multiplayer product
+- not a shared database-backed review service
 
-```text
-http://127.0.0.1:8000
-```
+## Best Way To Test It
 
-If your system does not have `python3` as a command, try:
+If you are giving this repo to a friend, the best test order is:
 
-```bash
-python serve.py
-```
+1. Run the local app and make sure the board loads.
+2. Play a few moves against Stockfish.
+3. Paste a PGN and confirm review mode works.
+4. Load the extension in Chrome.
+5. Finish a Chess.com game, click the extension, and confirm the review opens.
+6. Refresh the imported review page and confirm it still opens from the local cache.
 
-## Why This Exists
-
-This project was built for players who want a study board more than an "engine battle" app.
-
-The main goal is not:
-
-- to beat Stockfish
-- to play a polished online platform clone
-- to build a huge chess database product
-
-The main goal is:
-
-- to test ideas against an engine quickly
-- to see whether a move was good or bad immediately
-- to rewind without friction
-- to branch into another idea without losing the original line
-- to import a real game and review it locally
-
-In short, it is meant to feel closer to a training notebook than a competitive chess client.
-
-## Who This Is For
-
-This project is a good fit for:
-
-- club players who want fast move feedback
-- people studying their own games
-- people who want a free local alternative to paid review tools
-- developers or agents who want a small, hackable chess analysis app
-
-This project is probably not the right fit if you want:
-
-- online matchmaking
-- cloud accounts and synced history
-- a full tournament-grade GUI
-- exact Chess.com or Lichess backend behavior
-
-## Features
-
-- Play as White or Black against Stockfish
-- Live evaluation bar and best-move suggestion
-- Configurable Stockfish reply delay so you can study the best reply before it is played
-- Move grading with labels like `Best`, `Excellent`, `Good`, `Inaccuracy`, `Mistake`, `Blunder`
-- Extra heuristic labels like `Great Move`, `Brilliant`, and `Miss`
-- Board overlay arrow for the engine's best move
-- Clear end-of-game presentation with final result text and board overlay
-- Full move tree with branching and rewind/forward navigation
-- Rewind and manually branch for either side to test alternate replies
-- Drag-and-drop move input
-- Click-to-move input
-- Promotion modal
-- Import a game from:
-  - pasted PGN
-  - pasted Chess.com game link
-- Imported games are analyzed in the background so the full review fills in automatically
-
-## What This Is Not
-
-- Not a full tournament chess GUI
-- Not a faithful clone of Chess.com review internals
-- Not an opening explorer yet
-- Not a database-backed app
-- Not a server app with accounts, saved games, or multiplayer
+That covers the important paths.
 
 ## Requirements
 
+For normal use:
+
 - Python 3
-- A modern browser
+- a modern browser
 
-There is no Python package install step and no JavaScript build step.
+For the Chess.com extension flow:
 
-You do not need to install any project-specific dependencies.
+- Chrome or another Chromium-based browser with Manifest V3 support
 
-That means:
+Optional:
+
+- internet access for Chess.com imports and Chess.com-hosted piece images
+
+What you do not need:
 
 - no `pip install`
 - no `npm install`
-- no `yarn install`
-- no build command
-- Stockfish is already bundled in `vendor/stockfish/`
+- no build step
 
-This project currently uses:
+The engine is already bundled in `vendor/stockfish/`.
 
-- Python standard library only for the local server
-- plain browser JavaScript for the frontend
-- bundled local Stockfish files under `vendor/stockfish/`
+Optional for deployment:
 
-Optional but useful:
+- Docker
+- a hosting platform that can run a long-lived web process
+- a persistent disk if you want temporary import handoff files to survive restarts better
 
-- Internet access if you want:
-  - Chess.com piece images
-  - Chess.com link import
-
-The engine itself is bundled locally, so Stockfish does not depend on the internet.
-
-## Install From GitHub
-
-If you want to run the GitHub version locally, use:
-
-```bash
-git clone https://github.com/RayenGhanems/Chess-Trainer.git
-cd Chess-Trainer
-python3 serve.py
-```
-
-Then open:
-
-```text
-http://127.0.0.1:8000
-```
-
-## Setup Notes
-
-There is nothing to install with `pip`, `npm`, or `yarn`.
-
-That means:
-
-- no `requirements.txt` is needed right now
-- no `package.json` is needed right now
-- no build command is needed right now
-
-The only real setup requirement is that the machine can run:
-
-```bash
-python3
-```
-
-On systems where `python3` is not available, `python` may work instead.
-
-## Run From The Project Directory
+## Quick Start
 
 From the project directory:
 
@@ -176,479 +85,454 @@ Then open:
 http://127.0.0.1:8000
 ```
 
-## How It Runs
+If your machine uses `python` instead of `python3`, run:
 
-This app runs in a very simple way:
+```bash
+python serve.py
+```
 
-1. `serve.py` starts a local HTTP server on `127.0.0.1:8000`.
-2. Your browser loads `index.html`, `styles.css`, and `app.js`.
-3. `app.js` starts a Web Worker using the bundled Stockfish files in `vendor/stockfish/`.
-4. The UI renders the board and game tree entirely in the browser.
-5. All move generation, branching, board rendering, and most analysis logic happen client-side.
-6. The Python server is only used for:
-   - serving the files
-   - disabling cache during development
-   - proxying Chess.com import requests through `/api/import-game`
+## Deployment
 
-So the architecture is:
+This repo is now deployable as a small hosted beta.
 
-- browser app first
-- minimal Python helper second
-- no database
-- no backend state
-- no authentication layer
+The current deployment shape is:
 
-## What Happens On Import
+- one Python web process
+- static frontend files served by `serve.py`
+- temporary import handoff records written to disk
+- imported review cache still stored per user in the browser
+- lightweight in-memory rate limiting on import endpoints
 
-When you import a PGN or Chess.com game:
+That means deployment is good for:
 
-1. the game is parsed into moves
-2. the full imported main line is built as a node tree
-3. the app switches into review mode
-4. the current imported position is analyzed immediately
-5. Stockfish walks the rest of the imported line in the background
-6. move grades and evaluations fill in as that pass completes
+- private beta testing
+- sharing one hosted review URL with friends
+- using the extension against a hosted app origin
 
-This is why imported reviews may continue improving for a short time after the board first appears, especially at higher depth settings.
+It is not yet the same as a full hosted product with shared user accounts and cross-device saved history.
 
-## How To Use
+### Environment Variables
+
+The server supports these runtime variables:
+
+- `CHESS_TRAINER_HOST`: bind host
+- `CHESS_TRAINER_PORT`: optional custom port
+- `PORT`: hosting-platform port fallback
+- `CHESS_TRAINER_DATA_DIR`: directory for temporary server-side import handoff files
+
+Useful production defaults:
+
+```text
+CHESS_TRAINER_HOST=0.0.0.0
+CHESS_TRAINER_DATA_DIR=/data
+```
+
+### Health Check
+
+Use:
+
+```text
+/healthz
+```
+
+or:
+
+```text
+/api/healthz
+```
+
+### Option 1: Docker
+
+Build:
+
+```bash
+docker build -t chess-trainer .
+```
+
+Run:
+
+```bash
+docker run --rm -p 8000:8000 -e CHESS_TRAINER_HOST=0.0.0.0 -e CHESS_TRAINER_DATA_DIR=/data chess-trainer
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000
+```
+
+### Option 2: Render
+
+This repo includes `render.yaml` and `Dockerfile`.
+
+High-level Render steps:
+
+1. Push the repo to GitHub.
+2. Create a new Render web service from the repo.
+3. Let Render use `render.yaml`.
+4. Wait for the deploy to finish.
+5. Open `/healthz` on the deployed URL.
+6. Use that deployed origin in the extension options page.
+
+### Option 3: Procfile Platforms
+
+The repo also includes a `Procfile` for platforms that launch a standard web command.
+
+## Hosted Extension Flow
+
+If you deploy the app, the extension can target the hosted origin instead of localhost.
+
+To do that:
+
+1. load the unpacked extension
+2. open `Extension options`
+3. replace `http://127.0.0.1:8000` with your deployed app origin
+4. save the new origin
+
+Important:
+
+- the extension keeps local Chess.com access by default and requests extra host access only when you point it at a custom deployed app origin
+- it still only activates meaningfully when you click it on a Chess.com page
+
+## What The App Does
+
+The app has two main modes.
 
 ### Play Mode
 
-1. Start a new game.
-2. Choose whether you want to play as White or Black.
-3. Move pieces by:
-   - clicking a piece and then a target square
-   - dragging a piece onto a legal square
-4. After your move:
-   - Stockfish replies
-   - the evaluation updates
-   - the move gets graded
-5. Use the navigation buttons to go backward and forward through the line.
-6. If you go back and play a different move, a new branch is created.
+Use this as a training board against Stockfish.
+
+You can:
+
+- choose White or Black
+- make moves by click or drag
+- see the eval bar and best move suggestion
+- rewind to an earlier move
+- create a different branch instead of overwriting the line
 
 ### Review Mode
 
-1. Paste a PGN into the import box, or paste a Chess.com game link.
-2. Click `Import for review`.
-3. The app will:
-   - build the move tree for the imported game
-   - jump to the final position
-   - analyze the imported line in the background
-4. You can browse immediately, and the evaluations/labels will continue filling in.
+Use this to inspect a finished game.
+
+You can enter review mode by:
+
+- pasting a PGN
+- pasting a Chess.com game link
+- clicking the Chrome extension on a completed Chess.com game page
+
+In review mode the app:
+
+- builds the full imported move tree
+- jumps to the final imported position
+- starts a background Stockfish pass over the imported line
+- fills in evals and move grades as analysis completes
+
+## Main UI Areas
+
+The important parts of the UI are:
+
+- `Board`: current position
+- `Eval`: evaluation for the current position
+- `Move feedback`: grade for the latest reviewed move
+- `Engine suggestion`: best move from Stockfish
+- `Variation tree`: all saved moves and branches
+- `Branch explorer`: continuations from the current node
+- `Recent reviews`: locally cached imported games
+- `Import a game`: PGN / Chess.com import panel
+- `Cached permalink`: stable local review link for the current imported game
 
 ## Controls
 
-- `|<`: go to the start
+Buttons:
+
+- `|<`: jump to the start
 - `<`: go back one move
 - `>`: go forward one move
-- `>|`: go to the latest node
+- `>|`: jump to the latest node
 - `Flip board`: flip orientation
-- `Show best move arrow`: toggle engine best-move arrow overlay
-- `Coach depth`: change Stockfish depth
+- `New game`: reset back to a fresh play board
+
+Settings:
+
+- `Play as`: choose White or Black in play mode
+- `Coach depth`: target analysis depth, defaulting to the maximum on fresh load
+- `Stockfish delay`: delay before the engine auto-replies in play mode
+- `Show best move arrow`: toggle the best-move overlay
 
 Keyboard:
 
 - `Left Arrow`: back one move
 - `Right Arrow`: forward one move
 
-## Project Structure
+## How To Use It
+
+### A. Play Against Stockfish
+
+1. Start the server with `python3 serve.py`.
+2. Open `http://127.0.0.1:8000`.
+3. Wait until the top status says `Stockfish ready`.
+4. Make moves on the board.
+5. Use the navigation buttons to rewind.
+6. Play a different move from an older position to create a branch.
+
+Good signs that this is working:
+
+- the eval changes after moves
+- the engine replies in play mode
+- the move tree grows
+- rewinding and replaying creates alternate lines
+
+### B. Import A PGN
+
+1. Copy a PGN.
+2. Paste it into the `PGN or copied game text` box.
+3. Click `Import for review`.
+
+Expected result:
+
+- the app switches into review mode
+- the imported game appears in the move tree
+- the board jumps to the end of the imported line
+- the `Recent reviews` panel gets a new entry
+
+### C. Import A Chess.com Link Without The Extension
+
+1. Copy a Chess.com game URL.
+2. Paste it into the `Chess.com link` box.
+3. Click `Import for review`.
+
+This path works, but the extension is the better test path because it has more fallback options.
+
+### D. Import From Chess.com With The Extension
+
+This is the main product-shaped flow right now.
+
+1. Finish a game on Chess.com.
+2. Open the completed game page.
+3. Click the extension icon.
+4. A new local review tab should open.
+5. The app should load the imported game in review mode.
+6. After import, the URL should become a stable local route such as `/game/chesscom/<id>`.
+
+Expected result:
+
+- a new tab opens on the local app
+- the review loads without needing manual PGN paste
+- if the extension can identify the Chess.com account that clicked it, that player is shown at the bottom automatically, even when they were Black
+- the game appears under `Recent reviews`
+- refreshing the final `/game/...` page should still work in the same browser profile
+
+## Chrome Extension Setup
+
+The extension is documented in `extension/README.md`, but the short version is here too.
+
+### Load The Extension
+
+1. Open `chrome://extensions`
+2. Enable `Developer mode`
+3. Click `Load unpacked`
+4. Select the `extension/` folder
+
+### Configure The Extension
+
+1. In `chrome://extensions`, open the extension details page
+2. Click `Extension options`
+3. Set the app origin to:
+
+```text
+http://127.0.0.1:8000
+```
+
+If you run the server on another port, update that value to match.
+
+When you later switch the extension to a custom deployed origin, Chrome may prompt once for host access to that new origin.
+
+### Use The Extension
+
+1. Keep `python3 serve.py` running
+2. Open a completed Chess.com game page
+3. Click the extension icon once
+
+The extension currently tries these import sources in roughly this order:
+
+1. PGN already exposed on the page
+2. Chess.com public monthly archive PGN when a username/month match is available
+3. Chess.com page-native move list data such as `moveList=...`
+4. Structured move-list extraction from the DOM
+5. Raw page HTML as a last-resort handoff
+
+The goal is: open the review as soon as possible, then cache it locally.
+
+## What Is Stored Locally
+
+Two different kinds of local storage are used:
+
+### Browser local storage
+
+Imported games are cached in the browser so that:
+
+- `Recent reviews` works
+- `/game/chesscom/<id>` can reopen later
+- refreshes are fast after the first import
+
+Important:
+
+- this cache is per browser profile
+- if your friend changes browser or clears site storage, the local cache is gone
+
+### Temporary server-side handoff records
+
+The extension posts an import record to the local Python server first. That temporary handoff is then loaded by the app on `/import/<token>`.
+
+Those records are temporary and only exist to move data from the extension into the app.
+
+If `CHESS_TRAINER_DATA_DIR` is set, those handoff files are written there instead of under the repo working directory.
+
+## What To Ask A Tester To Check
+
+Here is a useful test checklist you can send directly.
+
+### Basic app checks
+
+- Does the app load at `http://127.0.0.1:8000`?
+- Does the page reach `Stockfish ready`?
+- Can you make moves on the board?
+- Does Stockfish reply?
+- Does the move tree update?
+
+### Review checks
+
+- Can you paste a PGN and get review mode?
+- After PGN import, do evals and move grades start filling in?
+- Does `Recent reviews` get a new item?
+- Does the `Cached permalink` update?
+
+### Chess.com extension checks
+
+- Does the extension load in `chrome://extensions` without crashing?
+- On a completed Chess.com game page, does clicking the extension open a review tab?
+- Does the review show the actual imported game instead of a fresh starting board?
+- After import, can you refresh the final `/game/...` page and still reopen the game?
+
+### Branching checks
+
+- In review mode, can you rewind and play a different move?
+- Does that create a branch instead of deleting the imported main line?
+
+## Known Limitations
+
+At this stage, your friend should expect these limits:
+
+- the app is local-only
+- the extension must be loaded manually in developer mode
+- the extension is meant for completed Chess.com game pages, not live assistance
+- the app does not run automatic review during games in progress
+- local review history is not synced across machines
+- deployed instances still do not provide shared cross-user saved-game history
+- some Chess.com pages may still need fallback handling if their DOM changes
+- if automated import fails, manual PGN paste is still the fallback
+
+## If Import Fails
+
+The fastest fallback is:
+
+1. open the Chess.com game page
+2. copy/export the PGN from Chess.com
+3. paste it into the app manually
+
+That still tests the review engine even if the page-handoff path fails.
+
+## Troubleshooting
+
+### The app opens but stays on a fresh starting board after import
+
+Check:
+
+- the local server is still running
+- the extension was reloaded after any code change
+- the review tab was hard refreshed with `Ctrl+Shift+R`
+
+### The extension opens a tab but no game loads
+
+Check:
+
+- the extension options origin matches the running server
+- the Chess.com page is a completed game page
+- the service worker console for the extension
+
+### The extension seems loaded but clicking it does nothing
+
+Open:
+
+- `chrome://extensions`
+- find `Review on Chess Trainer`
+- click `service worker`
+
+Then click the extension again and read the console output there.
+
+### Recent reviews are missing
+
+Remember:
+
+- they are stored in browser local storage
+- they are not shared between browsers or machines
+
+## What To Send Back In A Bug Report
+
+If your friend finds a bug, ask for:
+
+1. the exact Chess.com URL, if relevant
+2. what they clicked
+3. what they expected
+4. what actually happened
+5. the `Status` line text from the app
+6. the Python server terminal output
+7. the extension service worker console output, if the extension was involved
+
+That is enough to debug most issues quickly.
+
+## Optional Developer Checks
+
+Running the app does not require Node, but the repo includes tests.
+
+Python tests:
+
+```bash
+python3 -m unittest discover -s tests -q
+```
+
+If Node is available, the combined test command is:
+
+```bash
+npm test
+```
+
+## Project Layout
 
 ```text
 .
 ├── app.js
+├── extension/
 ├── index.html
-├── styles.css
 ├── serve.py
-├── favicon.svg
-└── vendor/
-    └── stockfish/
-        ├── stockfish-18-lite-single.js
-        ├── stockfish-18-lite-single.wasm
-        └── stockfish-18-asm.js
+├── src/
+│   ├── adapters/
+│   └── domain/
+├── styles.css
+├── tests/
+└── vendor/stockfish/
 ```
 
-### File Roles
+High-level roles:
 
-- `index.html`
-  - page layout
-  - board container
-  - sidebar panels
-  - import UI
-  - promotion modal
+- `app.js`: main browser app and UI state
+- `src/domain/`: chess rules, review logic, import normalization
+- `src/adapters/`: Stockfish bridge, import clients, local cache
+- `serve.py`: local file server and import handoff endpoints
+- `extension/`: Chrome MV3 one-click Chess.com import
 
-- `styles.css`
-  - page styling
-  - board theme
-  - move callout colors
-  - drag layer visuals
-  - import panel styling
+## Summary
 
-- `app.js`
-  - almost all application logic
-  - chess rules and move generation
-  - game tree state
-  - Stockfish integration
-  - move grading
-  - review/import logic
-  - board rendering
-  - drag-and-drop handling
+If you only send one paragraph to a tester, send this:
 
-- `serve.py`
-  - local static server
-  - disables caching
-  - exposes `/api/import-game` for Chess.com link import
-
-- `vendor/stockfish/*`
-  - bundled browser engine files
-
-## Architecture
-
-### 1. State Model
-
-The app uses a node tree rather than a flat move list.
-
-Each node represents one position and stores:
-
-- `state`: board state
-- `move`: move that led to this node
-- `children`: continuations
-- `preferredChildId`: chosen forward path from that node
-- `analysis`: Stockfish result for that position
-- `feedback`: grade for the move that led to the node
-- `ply`: move depth
-
-Important top-level app state in `app.js`:
-
-- `app.nodes`
-- `app.rootId`
-- `app.currentNodeId`
-- `app.latestNodeId`
-- `app.mode` (`play` or `review`)
-
-This makes branching easy. If you rewind and play something else, the app creates or reuses another child node instead of overwriting the line.
-
-### 2. Chess Rules
-
-`app.js` contains its own move generator and position logic.
-
-Important functions:
-
-- `generateLegalMoves`
-- `generatePseudoMovesForPiece`
-- `applyMove`
-- `isInCheck`
-- `isSquareAttacked`
-- `generateFen`
-- `parseFen`
-
-Supported rules include:
-
-- normal moves
-- captures
-- castling
-- en passant
-- promotion
-- checkmate and stalemate detection
-
-Not fully tracked yet:
-
-- threefold repetition
-- fifty-move rule draw claims
-- insufficient material draw logic
-
-### 3. Engine Integration
-
-Stockfish is wrapped by `StockfishBridge`.
-
-Important parts:
-
-- `ENGINE_CANDIDATES`
-- `StockfishBridge.init()`
-- `StockfishBridge.analyze()`
-- `parseEngineInfo()`
-
-The app tries:
-
-1. `stockfish-18-lite-single.js`
-2. `stockfish-18-asm.js`
-
-The engine is used for:
-
-- current position evaluation
-- best move suggestion
-- engine replies in play mode
-- grading imported games in review mode
-
-### 4. Play Mode Flow
-
-Main path:
-
-- `commitPlayerMove`
-- `requestEngineReplyForNode`
-- `ensureEngineWorkForCurrentNode`
-
-When you move:
-
-1. the move is applied into the tree
-2. the current node changes
-3. Stockfish evaluates the new position
-4. the move gets graded
-5. Stockfish replies if the app is in play mode
-
-### 5. Review Mode Flow
-
-Main path:
-
-- `parseImportedGame`
-- `importParsedGame`
-- `startReviewWarmup`
-- `requestReviewDataForNode`
-
-When you import a game:
-
-1. PGN is parsed into a move list
-2. the full main line is built into the node tree
-3. the app switches to `review` mode
-4. Stockfish starts a background warmup pass over the imported line
-5. each move node gets:
-   - position analysis
-   - move feedback
-
-The warmup pass is sequential because each move grade depends on the previous position's evaluation.
-
-### 6. Import Pipeline
-
-There are two import paths.
-
-#### Pasted PGN
-
-Handled entirely in the browser:
-
-- `extractPgnText`
-- `parsePgnHeaders`
-- `tokenizePgnMoves`
-- `matchSanMove`
-- `parseImportedGame`
-
-#### Chess.com Link
-
-Handled in two steps:
-
-1. Browser calls local endpoint:
-   - `/api/import-game?url=...`
-2. `serve.py` fetches the page server-side and returns the text
-3. `app.js` tries to extract PGN-like content from the response
-
-This exists because direct browser fetches to arbitrary Chess.com pages are usually blocked by CORS.
-
-## Where To Change Things
-
-This section is the main "future maintainer" map.
-
-### Change the Board Theme
-
-Edit CSS variables near the top of `styles.css`:
-
-- `--light-square`
-- `--dark-square`
-- `--selected`
-- `--target`
-- `--capture`
-
-### Change Piece Images
-
-Edit `PIECE_IMAGE_BASE_URL` in `app.js`.
-
-Current default points to Chess.com's `neo` set. If those images fail, the app falls back to Unicode piece glyphs.
-
-If you want the app to be fully offline visually too, bundle local piece PNGs or SVGs and change `pieceAssetUrl()`.
-
-### Change Move Labels / Grading Rules
-
-Edit these in `app.js`:
-
-- `buildMoveFeedback`
-- `isBrilliantSacrifice`
-- `isGreatMove`
-- `isMiss`
-- `PIECE_VALUES`
-
-Important note:
-
-The current labels are approximations. They are inspired by Chess.com-style review labels, but they are not generated by Chess.com's exact backend model.
-
-### Change Engine Depth Limits
-
-Edit the slider in `index.html`:
-
-```html
-<input type="range" id="depth-input" min="8" max="16" value="11">
-```
-
-And the engine behavior in:
-
-- `ensureEngineWorkForCurrentNode`
-- `startReviewWarmup`
-
-### Change Best-Move Arrow Behavior
-
-Edit:
-
-- `renderBoardOverlay`
-- `overlayPointForSquare`
-
-### Change Board Input Behavior
-
-Click input:
-
-- `onBoardClick`
-
-Drag-and-drop:
-
-- `onBoardPointerDown`
-- `onWindowPointerMove`
-- `onWindowPointerUp`
-- `onWindowPointerCancel`
-- `renderDragLayer`
-
-### Change Import Behavior
-
-Browser-side PGN parsing:
-
-- `extractPgnText`
-- `tokenizePgnMoves`
-- `matchSanMove`
-- `parseImportedGame`
-
-Server-side Chess.com fetching:
-
-- `serve.py`
-- `NoCacheHandler.handle_import_game`
-- `ALLOWED_IMPORT_HOSTS`
-
-### Change Review Warmup Behavior
-
-Edit:
-
-- `startReviewWarmup`
-- `analyzeNodeForWarmup`
-- `requestReviewDataForNode`
-- `reviewWarmupMessage`
-
-This is the part responsible for automatically filling imported games with evaluations and feedback in the background.
-
-## Why There Are No `Book` Moves Yet
-
-Stockfish alone cannot tell you that a move is a true opening-book move.
-
-It can tell you:
-
-- whether a move is strong
-- whether it matches the best engine move
-- how much evaluation was lost
-
-But `Book` labeling normally comes from an opening database or opening explorer, not from raw engine analysis.
-
-So right now:
-
-- the app can grade opening moves as good/best/etc
-- the app cannot honestly label them as `Book`
-
-If you want to add this later, the clean solution is:
-
-1. choose an opening database source
-2. match the current move sequence against that database
-3. if the move is in book, label it `Book`
-4. stop using the `Book` label once the line leaves known theory
-
-## Limitations
-
-- Move classification is approximate, not Chess.com's exact system
-- No opening-book database yet
-- No persistent storage
-- No multiplayer
-- No PGN export yet
-- No full draw-rule coverage
-- Chess.com link import depends on the page still containing extractable PGN-like data
-- Piece images come from Chess.com URLs unless you bundle your own local set
-
-## Troubleshooting
-
-### The page loads but Stockfish does not work
-
-Check the engine status pill in the top-right corner.
-
-Expected good state:
-
-- `Stockfish ready`
-
-If it fails:
-
-- hard refresh with `Ctrl+Shift+R`
-- confirm the `vendor/stockfish/` files are present
-- make sure you started the page through `python3 serve.py` and not directly from the filesystem
-
-### Imported game shows no feedback immediately
-
-The app should now analyze the imported game in the background automatically.
-
-If it still looks incomplete:
-
-- wait for the import status line to finish
-- lower the depth slider
-- check whether the engine status says `Stockfish ready`
-
-### Chess.com link import fails
-
-Possible causes:
-
-- Chess.com returned a different page shape
-- network issue
-- blocked host
-- page content does not expose a PGN that the current parser can extract
-
-Fallback:
-
-- open the game on Chess.com
-- copy the PGN
-- paste the PGN directly into the import text area
-
-### Port 8000 is already in use
-
-Edit `serve.py` and change:
-
-```python
-ThreadingHTTPServer(("127.0.0.1", 8000), NoCacheHandler)
-```
-
-to another port, for example `8001`.
-
-## Development Notes
-
-- `serve.py` sends `Cache-Control: no-store`, so reload behavior is simpler during local edits.
-- The app is intentionally plain JavaScript without a framework.
-- There is no build step.
-- Because everything is in `app.js`, the easiest way to make bigger future changes is usually to split it into modules once the feature set stabilizes.
-
-## Suggested Future Improvements
-
-- Real opening-book detection
-- PGN export
-- Save/load analysis locally
-- Better move classification model
-- Engine multi-PV support
-- Arrows for played move plus best move comparison
-- Local piece assets for fully offline visuals
-- Decompose `app.js` into modules:
-  - rules
-  - engine
-  - rendering
-  - import/review
-  - feedback
-
-## License / Sharing
-
-This repo is currently just a personal project structure. If you plan to publish it on GitHub and want other people to use or modify it, add an explicit license file such as `MIT`.
-
-Without a license, people can view the code on GitHub, but the reuse rights are unclear.
+Start the app with `python3 serve.py` or deploy it with the included Docker / Render files, open the app in a browser, confirm Stockfish works, then load the unpacked Chrome extension from `extension/`, finish or open a completed Chess.com game, click the extension, and confirm the review opens and appears under `Recent reviews`. If anything fails, send the app `Status` text, the server terminal output, and the extension service worker console output.

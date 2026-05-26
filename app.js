@@ -1,32 +1,46 @@
-const FILES = "abcdefgh";
-const PIECE_GLYPHS = {
-  wk: "♔",
-  wq: "♕",
-  wr: "♖",
-  wb: "♗",
-  wn: "♘",
-  wp: "♙",
-  bk: "♚",
-  bq: "♛",
-  br: "♜",
-  bb: "♝",
-  bn: "♞",
-  bp: "♟",
-};
+import {
+  FILES,
+  PIECE_GLYPHS,
+  PROMOTION_TYPES,
+  cloneState,
+  colorName,
+  coordsToIndex,
+  createInitialState,
+  formatSanMove,
+  findKing,
+  generateFen,
+  generateLegalMoves,
+  getGameResult,
+  indexToCoords,
+  moveToUci,
+  oppositeColor,
+  parseImportedGame,
+  parseUciMove,
+  squareName,
+  applyMove,
+} from "./src/domain/chess.js";
+import {
+  buildMoveFeedback,
+  evalFillPercent,
+  formatScore,
+  formatWhitePerspectiveNumeric,
+  whitePerspectiveScore,
+} from "./src/domain/review.js";
+import {
+  buildPgnFromSanMoves,
+  buildNormalizedGameRecord,
+  extractChessComGameRef,
+  parseImportTokenRoute,
+  parseGameRoute,
+  routePathForRecord,
+} from "./src/domain/import.js";
+import { StockfishBridge } from "./src/adapters/engine/stockfishBridge.js";
+import { fetchImportedTextFromUrl } from "./src/adapters/import/chessComImportClient.js";
+import { fetchImportedRecordFromToken } from "./src/adapters/import/importRecordClient.js";
+import { createGameCache } from "./src/adapters/storage/gameCache.js";
+
 const PIECE_IMAGE_BASE_URL = "https://www.chess.com/chess-themes/pieces/neo/300";
-const PROMOTION_TYPES = ["q", "r", "b", "n"];
-const PIECE_VALUES = {
-  p: 1,
-  n: 3,
-  b: 3.15,
-  r: 5,
-  q: 9,
-  k: 0,
-};
-const COLOR_NAMES = {
-  w: "White",
-  b: "Black",
-};
+
 const FEEDBACK_PRESENTATIONS = {
   brilliant: { symbol: "!!", label: "Brilliant", color: "#2fd7c4" },
   great: { symbol: "!", label: "Great", color: "#7fb2ff" },
@@ -39,6 +53,7 @@ const FEEDBACK_PRESENTATIONS = {
   blunder: { symbol: "??", label: "Blunder", color: "#ff5146" },
   pending: { symbol: "…", label: "Grading", color: "#c9d1c2" },
 };
+
 const MOVE_KEY_ITEMS = [
   ["brilliant", "Best sacrifice or standout tactical idea."],
   ["great", "Best move in a critical moment."],
@@ -50,17 +65,9 @@ const MOVE_KEY_ITEMS = [
   ["blunder", "Big drop, usually more than 300 cp lost."],
   ["miss", "Missed a strong chance or winning idea."],
 ];
+
 const REVIEW_SUMMARY_TONES = ["brilliant", "great", "best", "mistake", "miss", "blunder"];
-const ENGINE_CANDIDATES = [
-  {
-    label: "Local Stockfish 18 lite",
-    scriptUrl: "./vendor/stockfish/stockfish-18-lite-single.js",
-  },
-  {
-    label: "Local Stockfish 18 asm fallback",
-    scriptUrl: "./vendor/stockfish/stockfish-18-asm.js",
-  },
-];
+const IMPORT_HISTORY_LIMIT = 8;
 
 const elements = {
   board: document.querySelector("#board"),
@@ -100,7 +107,26 @@ const elements = {
   importPgn: document.querySelector("#import-pgn"),
   importButton: document.querySelector("#import-game-btn"),
   importStatus: document.querySelector("#import-status"),
+  importPermalink: document.querySelector("#import-permalink"),
+  importHistory: document.querySelector("#import-history"),
 };
+
+function defaultCoachDepth() {
+  const maxDepth = Number(elements.depthInput?.max);
+  if (Number.isFinite(maxDepth) && maxDepth > 0) {
+    return maxDepth;
+  }
+  const fallbackDepth = Number(elements.depthInput?.value);
+  return Number.isFinite(fallbackDepth) && fallbackDepth > 0 ? fallbackDepth : 16;
+}
+
+const DEFAULT_COACH_DEPTH = defaultCoachDepth();
+if (elements.depthInput) {
+  elements.depthInput.value = String(DEFAULT_COACH_DEPTH);
+}
+if (elements.depthValue) {
+  elements.depthValue.textContent = String(DEFAULT_COACH_DEPTH);
+}
 
 const app = {
   nodes: new Map(),
@@ -110,7 +136,7 @@ const app = {
   mode: "play",
   playerColor: "w",
   orientation: "w",
-  depth: Number(elements.depthInput.value),
+  depth: DEFAULT_COACH_DEPTH,
   engineReplyDelayMs: Number(elements.replyDelayInput.value) * 1000,
   selectedSquare: null,
   pendingPromotion: null,
@@ -136,390 +162,284 @@ const app = {
   pendingEngineReply: null,
   engineReady: false,
   engine: null,
+  gameCache: createGameCache(),
+  recentImports: [],
+  currentImportedGame: null,
 };
 
 let nodeCounter = 0;
-
-class StockfishBridge {
-  constructor(onStatus) {
-    this.onStatus = onStatus;
-    this.worker = null;
-    this.ready = false;
-    this.activeJob = null;
-    this.jobQueue = [];
-    this.processing = false;
-    this.engineUrl = null;
-  }
-
-  async init() {
-    let lastError = null;
-    for (const candidate of ENGINE_CANDIDATES) {
-      try {
-        this.onStatus(`Loading ${candidate.label}...`);
-        await this.connect(candidate);
-        this.engineUrl = candidate.scriptUrl;
-        this.onStatus(`${candidate.label} ready`);
-        return;
-      } catch (error) {
-        lastError = error;
-        this.disposeWorker();
-      }
-    }
-
-    throw lastError ?? new Error("Failed to initialize Stockfish.");
-  }
-
-  async analyze(fen, depth) {
-    if (!this.ready || !this.worker) {
-      throw new Error("Stockfish is not ready.");
-    }
-
-    return new Promise((resolve, reject) => {
-      this.jobQueue.push({ fen, depth, resolve, reject });
-      this.pump();
-    });
-  }
-
-  newGame() {
-    if (!this.ready || !this.worker) {
-      return;
-    }
-    this.worker.postMessage("ucinewgame");
-    this.worker.postMessage("isready");
-  }
-
-  cancelPendingJobs(reason = "superseded") {
-    if (!this.jobQueue.length) {
-      return;
-    }
-    const error = new Error(reason);
-    while (this.jobQueue.length) {
-      const job = this.jobQueue.shift();
-      job?.reject(error);
-    }
-  }
-
-  connect(candidate) {
-    return new Promise((resolve, reject) => {
-      try {
-        const worker = new Worker(candidate.scriptUrl);
-        let settled = false;
-        const timeoutId = window.setTimeout(() => {
-          fail(new Error("Timed out while loading the Stockfish worker."));
-        }, 15000);
-
-        const cleanup = () => {
-          worker.removeEventListener("message", onMessage);
-          worker.removeEventListener("error", onError);
-          window.clearTimeout(timeoutId);
-        };
-
-        const fail = (error) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          cleanup();
-          try {
-            worker.terminate();
-          } catch {
-            // Nothing to clean up beyond termination attempt.
-          }
-          reject(error);
-        };
-
-        const succeed = () => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          cleanup();
-          this.worker = worker;
-          this.ready = true;
-          this.worker.addEventListener("message", (event) => this.handleMessage(String(event.data ?? "")));
-          this.worker.postMessage("setoption name UCI_AnalyseMode value true");
-          this.worker.postMessage("setoption name Skill Level value 20");
-          this.worker.postMessage("ucinewgame");
-          resolve();
-        };
-
-        const onMessage = (event) => {
-          const line = String(event.data ?? "").trim();
-          if (!line) {
-            return;
-          }
-          if (line === "uciok") {
-            worker.postMessage("isready");
-            return;
-          }
-          if (line === "readyok") {
-            succeed();
-          }
-        };
-
-        const onError = (event) => {
-          const detail = event?.message ? `: ${event.message}` : "";
-          fail(new Error(`Failed to load worker from ${candidate.scriptUrl}${detail}`));
-        };
-
-        worker.addEventListener("message", onMessage);
-        worker.addEventListener("error", onError);
-        worker.postMessage("uci");
-      } catch (error) {
-        reject(new Error(`Could not create a worker for ${candidate.label}: ${error.message}`));
-      }
-    });
-  }
-
-  async pump() {
-    if (this.processing) {
-      return;
-    }
-
-    this.processing = true;
-    while (this.jobQueue.length) {
-      const job = this.jobQueue.shift();
-      try {
-        const result = await this.executeJob(job.fen, job.depth);
-        job.resolve(result);
-      } catch (error) {
-        job.reject(error);
-      }
-    }
-    this.processing = false;
-  }
-
-  executeJob(fen, depth) {
-    return new Promise((resolve, reject) => {
-      const timeoutId = window.setTimeout(() => {
-        this.activeJob = null;
-        reject(new Error("Stockfish analysis timed out."));
-      }, 20000);
-
-      this.activeJob = {
-        resolve,
-        reject,
-        timeoutId,
-        depth,
-        score: null,
-        pv: [],
-      };
-
-      this.worker.postMessage(`position fen ${fen}`);
-      this.worker.postMessage(`go depth ${depth}`);
-    });
-  }
-
-  handleMessage(line) {
-    if (!this.activeJob) {
-      return;
-    }
-
-    if (line.startsWith("info ")) {
-      const parsed = parseEngineInfo(line);
-      if (parsed.score) {
-        this.activeJob.score = parsed.score;
-      }
-      if (parsed.pv.length) {
-        this.activeJob.pv = parsed.pv;
-      }
-      return;
-    }
-
-    if (line.startsWith("bestmove")) {
-      const parts = line.split(/\s+/);
-      const bestmove = parts[1] ?? "(none)";
-      const job = this.activeJob;
-      this.activeJob = null;
-      window.clearTimeout(job.timeoutId);
-      job.resolve({
-        bestmove,
-        score: job.score,
-        pv: job.pv,
-        depth: job.depth,
-      });
-    }
-  }
-
-  disposeWorker() {
-    this.ready = false;
-    this.activeJob = null;
-    this.cancelPendingJobs("disposed");
-    this.processing = false;
-    if (this.worker) {
-      try {
-        this.worker.terminate();
-      } catch {
-        // Termination errors are not actionable here.
-      }
-    }
-    this.worker = null;
-  }
-}
-
-function parseEngineInfo(line) {
-  const cpMatch = line.match(/\bscore cp (-?\d+)/);
-  const mateMatch = line.match(/\bscore mate (-?\d+)/);
-  const pvMatch = line.match(/\bpv (.+)$/);
-  const pv = pvMatch ? pvMatch[1].trim().split(/\s+/).filter(Boolean) : [];
-
-  if (mateMatch) {
-    return {
-      score: { kind: "mate", value: Number(mateMatch[1]) },
-      pv,
-    };
-  }
-
-  if (cpMatch) {
-    return {
-      score: { kind: "cp", value: Number(cpMatch[1]) },
-      pv,
-    };
-  }
-
-  return { score: null, pv };
-}
-
-function createInitialState() {
-  const board = Array(64).fill(null);
-  const backRank = ["r", "n", "b", "q", "k", "b", "n", "r"];
-
-  for (let file = 0; file < 8; file += 1) {
-    board[coordsToIndex(file, 0)] = { color: "b", type: backRank[file] };
-    board[coordsToIndex(file, 1)] = { color: "b", type: "p" };
-    board[coordsToIndex(file, 6)] = { color: "w", type: "p" };
-    board[coordsToIndex(file, 7)] = { color: "w", type: backRank[file] };
-  }
-
-  return {
-    board,
-    turn: "w",
-    castling: {
-      wK: true,
-      wQ: true,
-      bK: true,
-      bQ: true,
-    },
-    epSquare: null,
-    halfmove: 0,
-    fullmove: 1,
-  };
-}
-
-function cloneState(state) {
-  return {
-    board: state.board.map((piece) => (piece ? { ...piece } : null)),
-    turn: state.turn,
-    castling: { ...state.castling },
-    epSquare: state.epSquare,
-    halfmove: state.halfmove,
-    fullmove: state.fullmove,
-  };
-}
 
 function nextNodeId() {
   nodeCounter += 1;
   return `node-${nodeCounter}`;
 }
 
-function coordsToIndex(file, rank) {
-  return rank * 8 + file;
-}
-
-function indexToCoords(index) {
-  return { file: index % 8, rank: Math.floor(index / 8) };
-}
-
-function squareName(index) {
-  const { file, rank } = indexToCoords(index);
-  return `${FILES[file]}${8 - rank}`;
-}
-
-function parseSquare(name) {
-  if (!name || name.length !== 2) {
+function currentImportedGameKey(record = app.currentImportedGame) {
+  if (!record) {
     return null;
   }
-  const file = FILES.indexOf(name[0]);
-  const rank = 8 - Number(name[1]);
-  if (file < 0 || rank < 0 || rank > 7) {
+  if (record.source && record.sourceGameId) {
+    return `${record.source}:${record.sourceGameId}`;
+  }
+  return record.pgnHash ?? null;
+}
+
+function importRecordTitle(record) {
+  const whiteName = record?.whiteUsername || record?.headers?.White || "White";
+  const blackName = record?.blackUsername || record?.headers?.Black || "Black";
+  return `${whiteName} vs ${blackName}`;
+}
+
+function sourceLabel(record) {
+  return record?.source === "chesscom" ? "Chess.com" : "Local PGN";
+}
+
+function formatImportDate(value) {
+  if (!value) {
     return null;
   }
-  return coordsToIndex(file, rank);
-}
 
-function isOnBoard(file, rank) {
-  return file >= 0 && file < 8 && rank >= 0 && rank < 8;
-}
-
-function oppositeColor(color) {
-  return color === "w" ? "b" : "w";
-}
-
-function colorName(color) {
-  return COLOR_NAMES[color] ?? "Unknown";
-}
-
-function moveToUci(move) {
-  return `${squareName(move.from)}${squareName(move.to)}${move.promotion ?? ""}`;
-}
-
-function formatMoveLabel(move) {
-  if (move.isCastle) {
-    return move.to > move.from ? "O-O" : "O-O-O";
-  }
-  const piecePrefix = move.piece.type === "p" ? "" : move.piece.type.toUpperCase();
-  const separator = move.capture ? "x" : "-";
-  const promotion = move.promotion ? `=${move.promotion.toUpperCase()}` : "";
-  return `${piecePrefix}${squareName(move.from)}${separator}${squareName(move.to)}${promotion}`;
-}
-
-function formatSanMove(state, move, legalMoves = null) {
-  if (move.isCastle) {
-    return withSanSuffix(state, move, move.to > move.from ? "O-O" : "O-O-O");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
   }
 
-  const pieceLetter = move.piece.type === "p" ? "" : move.piece.type.toUpperCase();
-  const moveSet = legalMoves ?? generateLegalMoves(state, move.color);
-  let disambiguation = "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
 
-  if (move.piece.type === "p") {
-    if (move.capture) {
-      disambiguation = FILES[indexToCoords(move.from).file];
+  return parsed.toISOString().slice(0, 10);
+}
+
+function replaceBrowserPath(pathname) {
+  if (!window.history?.replaceState) {
+    return;
+  }
+  const nextUrl = new URL(window.location.href);
+  nextUrl.pathname = pathname;
+  nextUrl.search = "";
+  nextUrl.hash = "";
+  window.history.replaceState(null, "", nextUrl);
+}
+
+function syncRouteForImportedGame(record) {
+  if (!record) {
+    replaceBrowserPath("/");
+    return;
+  }
+  replaceBrowserPath(routePathForRecord(record));
+}
+
+function refreshImportHistory() {
+  app.recentImports = app.gameCache.listRecentGames(IMPORT_HISTORY_LIMIT);
+}
+
+function isNormalizedImportedGameRecord(record) {
+  return Boolean(
+    record
+    && typeof record === "object"
+    && typeof record.pgn === "string"
+    && typeof record.pgnHash === "string"
+    && !("initialState" in record),
+  );
+}
+
+function finalizeImportedGameCache(recordOrParsedRecord, metadata = {}) {
+  const normalizedRecord = isNormalizedImportedGameRecord(recordOrParsedRecord)
+    ? recordOrParsedRecord
+    : buildNormalizedGameRecord(recordOrParsedRecord, metadata);
+  const cachedRecord = app.gameCache.save(normalizedRecord);
+  app.currentImportedGame = cachedRecord;
+  refreshImportHistory();
+  syncRouteForImportedGame(cachedRecord);
+  renderImportPermalink();
+  renderImportHistory();
+  return cachedRecord;
+}
+
+function normalizeImportedSanToken(token) {
+  return String(token || "")
+    .trim()
+    .replace(/^(\d+)\.(\.\.)?$/, "")
+    .replace(/[?!]+$/g, "")
+    .replace(/^0-0-0$/i, "O-O-O")
+    .replace(/^0-0$/i, "O-O");
+}
+
+function isImportedSanToken(token) {
+  return /^(?:O-O(?:-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?|[a-h]x[a-h][1-8](?:=[QRBN])?[+#]?|[a-h][1-8](?:=[QRBN])?[+#]?)$/.test(token);
+}
+
+function tokenizeImportedMoveText(text) {
+  return String(text || "")
+    .replace(/\{[^}]*\}/g, " ")
+    .replace(/\d+\.(?:\.\.)?/g, " ")
+    .split(/\s+/)
+    .map(normalizeImportedSanToken)
+    .filter((token) => token && isImportedSanToken(token));
+}
+
+function extractMoveCandidatesFromImportedHtml(importedText) {
+  const html = typeof importedText === "string" ? importedText : "";
+  if (!html || !/<(?:!doctype\s+html|html)\b/i.test(html)) {
+    return [];
+  }
+
+  const candidates = [];
+  const hrefPattern = /href="([^"]*moveList=[^"]+)"/gi;
+  for (const match of html.matchAll(hrefPattern)) {
+    const href = match[1].replaceAll("&amp;", "&");
+    try {
+      const resolved = new URL(href, "https://www.chess.com");
+      const moveList = resolved.searchParams.get("moveList") || "";
+      const moves = tokenizeImportedMoveText(moveList);
+      if (moves.length >= 6) {
+        candidates.push({
+          source: "html-explorer-moveList",
+          moves,
+        });
+      }
+    } catch {
+      // Ignore malformed explorer links and keep scanning.
     }
-  } else {
-    const conflicts = moveSet.filter((candidate) => (
-      candidate.from !== move.from
-      && candidate.to === move.to
-      && candidate.piece.type === move.piece.type
-      && candidate.color === move.color
-    ));
+  }
 
-    if (conflicts.length) {
-      const origin = indexToCoords(move.from);
-      const sharesFile = conflicts.some((candidate) => indexToCoords(candidate.from).file === origin.file);
-      const sharesRank = conflicts.some((candidate) => indexToCoords(candidate.from).rank === origin.rank);
+  const deduped = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const key = candidate.moves.join(" ");
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(candidate);
+  }
 
-      if (sharesFile && sharesRank) {
-        disambiguation = `${FILES[origin.file]}${8 - origin.rank}`;
-      } else if (sharesFile) {
-        disambiguation = String(8 - origin.rank);
-      } else {
-        disambiguation = FILES[origin.file];
+  return deduped;
+}
+
+function importSourceTextFromPayload(payload) {
+  const directPgn = typeof payload?.pgn === "string" ? payload.pgn.trim() : "";
+  if (directPgn) {
+    return directPgn;
+  }
+
+  const moveCandidates = Array.isArray(payload?.moveCandidates) ? payload.moveCandidates : [];
+  for (const candidate of moveCandidates) {
+    if (!Array.isArray(candidate?.moves) || !candidate.moves.length) {
+      continue;
+    }
+    const pgn = buildPgnFromSanMoves(payload.headers ?? {}, candidate.moves);
+    try {
+      parseImportedGame(pgn);
+      return pgn;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  if (Array.isArray(payload?.moves) && payload.moves.length) {
+    const pgn = buildPgnFromSanMoves(payload.headers ?? {}, payload.moves);
+    try {
+      parseImportedGame(pgn);
+      return pgn;
+    } catch {
+      // Fall through to importedText if the SAN scrape was noisy.
+    }
+  }
+
+  const importedText = typeof payload?.importedText === "string" ? payload.importedText.trim() : "";
+  if (importedText) {
+    const htmlMoveCandidates = extractMoveCandidatesFromImportedHtml(importedText);
+    for (const candidate of htmlMoveCandidates) {
+      const pgn = buildPgnFromSanMoves(payload.headers ?? {}, candidate.moves);
+      try {
+        parseImportedGame(pgn);
+        return pgn;
+      } catch {
+        // Keep trying other structured candidates.
       }
     }
+
+    if (/<(?:!doctype\s+html|html)\b/i.test(importedText) && !/"pgn"\s*:\s*"((?:\\.|[^"\\])*)"/i.test(importedText)) {
+      throw new Error("Could not extract a playable move list from the Chess.com page.");
+    }
+    return importedText;
   }
 
-  const captureMarker = move.capture ? "x" : "";
-  const promotion = move.promotion ? `=${move.promotion.toUpperCase()}` : "";
-  return withSanSuffix(state, move, `${pieceLetter}${disambiguation}${captureMarker}${squareName(move.to)}${promotion}`);
+  throw new Error("Import handoff did not include PGN or imported text.");
 }
 
-function withSanSuffix(state, move, baseSan) {
-  const nextState = applyMove(state, move);
-  if (!isInCheck(nextState, nextState.turn)) {
-    return baseSan;
+function renderImportPermalink() {
+  if (!elements.importPermalink) {
+    return;
   }
-  return `${baseSan}${generateLegalMoves(nextState).length ? "+" : "#"}`;
+
+  if (!app.currentImportedGame) {
+    elements.importPermalink.textContent = "Import a game to create a reopenable local link in this browser.";
+    return;
+  }
+
+  elements.importPermalink.textContent = new URL(
+    routePathForRecord(app.currentImportedGame),
+    window.location.origin,
+  ).toString();
+}
+
+function renderImportHistory() {
+  if (!elements.importHistory) {
+    return;
+  }
+
+  if (!app.recentImports.length) {
+    elements.importHistory.innerHTML = `
+      <p class="import-history-empty">
+        Imported games are cached locally here. Reopen them instantly after the first import.
+      </p>
+    `;
+    return;
+  }
+
+  const activeKey = currentImportedGameKey();
+  elements.importHistory.innerHTML = app.recentImports.map((record) => {
+    const metaParts = [
+      sourceLabel(record),
+      formatImportDate(record.playedAt),
+      record.result && record.result !== "*" ? record.result : null,
+    ].filter(Boolean);
+    const identifier = record.source && record.sourceGameId
+      ? `${record.source}:${record.sourceGameId}`
+      : (record.pgnHash ?? "");
+    const isActive = identifier === activeKey;
+
+    return `
+      <button
+        type="button"
+        class="import-history-item${isActive ? " active" : ""}"
+        data-cache-key="${escapeHtml(identifier)}"
+      >
+        <strong>${escapeHtml(importRecordTitle(record))}</strong>
+        <span>${escapeHtml(metaParts.join(" • ") || "Cached review")}</span>
+      </button>
+    `;
+  }).join("");
+}
+
+function findCachedRecordByKey(cacheKey) {
+  if (!cacheKey) {
+    return null;
+  }
+
+  const sourceSeparator = cacheKey.indexOf(":");
+  if (sourceSeparator > 0) {
+    const source = cacheKey.slice(0, sourceSeparator);
+    const sourceGameId = cacheKey.slice(sourceSeparator + 1);
+    if (source && sourceGameId && source !== "local") {
+      return app.gameCache.findBySourceGameId(source, sourceGameId);
+    }
+  }
+
+  return app.gameCache.findByPgnHash(cacheKey);
 }
 
 function pieceAssetUrl(piece) {
@@ -537,718 +457,6 @@ function pieceAriaLabel(piece) {
     p: "pawn",
   };
   return `${color} ${names[piece.type]}`;
-}
-
-function parseUciMove(uci) {
-  if (!uci || uci.length < 4) {
-    return null;
-  }
-  const from = parseSquare(uci.slice(0, 2));
-  const to = parseSquare(uci.slice(2, 4));
-  if (from == null || to == null) {
-    return null;
-  }
-  return {
-    from,
-    to,
-    promotion: uci[4] ?? null,
-  };
-}
-
-function createMove(base) {
-  return {
-    from: base.from,
-    to: base.to,
-    piece: { ...base.piece },
-    color: base.piece.color,
-    capture: base.capture ? { ...base.capture } : null,
-    capturedSquare: base.capturedSquare ?? base.to,
-    promotion: base.promotion ?? null,
-    isEnPassant: Boolean(base.isEnPassant),
-    isCastle: Boolean(base.isCastle),
-    rookFrom: base.rookFrom ?? null,
-    rookTo: base.rookTo ?? null,
-  };
-}
-
-function generateLegalMoves(state, color = state.turn) {
-  const moves = [];
-  for (let index = 0; index < 64; index += 1) {
-    const piece = state.board[index];
-    if (!piece || piece.color !== color) {
-      continue;
-    }
-    for (const move of generatePseudoMovesForPiece(state, index, piece)) {
-      const nextState = applyMove(state, move);
-      if (!isInCheck(nextState, color)) {
-        moves.push(move);
-      }
-    }
-  }
-  return moves;
-}
-
-function generatePseudoMovesForPiece(state, index, piece) {
-  const { file, rank } = indexToCoords(index);
-  const moves = [];
-
-  if (piece.type === "p") {
-    const direction = piece.color === "w" ? -1 : 1;
-    const startRank = piece.color === "w" ? 6 : 1;
-    const promotionRank = piece.color === "w" ? 0 : 7;
-    const singleRank = rank + direction;
-
-    if (isOnBoard(file, singleRank)) {
-      const singleTarget = coordsToIndex(file, singleRank);
-      if (!state.board[singleTarget]) {
-        if (singleRank === promotionRank) {
-          for (const promotion of PROMOTION_TYPES) {
-            moves.push(createMove({ from: index, to: singleTarget, piece, promotion }));
-          }
-        } else {
-          moves.push(createMove({ from: index, to: singleTarget, piece }));
-        }
-
-        const doubleRank = rank + direction * 2;
-        if (rank === startRank && isOnBoard(file, doubleRank)) {
-          const doubleTarget = coordsToIndex(file, doubleRank);
-          if (!state.board[doubleTarget]) {
-            moves.push(createMove({ from: index, to: doubleTarget, piece }));
-          }
-        }
-      }
-    }
-
-    for (const fileStep of [-1, 1]) {
-      const targetFile = file + fileStep;
-      const targetRank = rank + direction;
-      if (!isOnBoard(targetFile, targetRank)) {
-        continue;
-      }
-      const target = coordsToIndex(targetFile, targetRank);
-      const occupant = state.board[target];
-      if (occupant && occupant.color !== piece.color) {
-        if (targetRank === promotionRank) {
-          for (const promotion of PROMOTION_TYPES) {
-            moves.push(createMove({ from: index, to: target, piece, capture: occupant, promotion }));
-          }
-        } else {
-          moves.push(createMove({ from: index, to: target, piece, capture: occupant }));
-        }
-      }
-
-      if (state.epSquare === target) {
-        const capturedSquare = coordsToIndex(targetFile, rank);
-        const capturedPiece = state.board[capturedSquare];
-        if (capturedPiece && capturedPiece.type === "p" && capturedPiece.color !== piece.color) {
-          moves.push(
-            createMove({
-              from: index,
-              to: target,
-              piece,
-              capture: capturedPiece,
-              capturedSquare,
-              isEnPassant: true,
-            }),
-          );
-        }
-      }
-    }
-
-    return moves;
-  }
-
-  if (piece.type === "n") {
-    const offsets = [
-      [1, 2],
-      [2, 1],
-      [2, -1],
-      [1, -2],
-      [-1, -2],
-      [-2, -1],
-      [-2, 1],
-      [-1, 2],
-    ];
-    for (const [dx, dy] of offsets) {
-      const nextFile = file + dx;
-      const nextRank = rank + dy;
-      if (!isOnBoard(nextFile, nextRank)) {
-        continue;
-      }
-      const target = coordsToIndex(nextFile, nextRank);
-      const occupant = state.board[target];
-      if (!occupant || occupant.color !== piece.color) {
-        moves.push(createMove({ from: index, to: target, piece, capture: occupant }));
-      }
-    }
-    return moves;
-  }
-
-  if (piece.type === "k") {
-    for (let dx = -1; dx <= 1; dx += 1) {
-      for (let dy = -1; dy <= 1; dy += 1) {
-        if (dx === 0 && dy === 0) {
-          continue;
-        }
-        const nextFile = file + dx;
-        const nextRank = rank + dy;
-        if (!isOnBoard(nextFile, nextRank)) {
-          continue;
-        }
-        const target = coordsToIndex(nextFile, nextRank);
-        const occupant = state.board[target];
-        if (!occupant || occupant.color !== piece.color) {
-          moves.push(createMove({ from: index, to: target, piece, capture: occupant }));
-        }
-      }
-    }
-
-    const enemy = oppositeColor(piece.color);
-    if (piece.color === "w" && rank === 7 && file === 4) {
-      if (
-        state.castling.wK &&
-        !state.board[parseSquare("f1")] &&
-        !state.board[parseSquare("g1")] &&
-        !isSquareAttacked(state, parseSquare("e1"), enemy) &&
-        !isSquareAttacked(state, parseSquare("f1"), enemy) &&
-        !isSquareAttacked(state, parseSquare("g1"), enemy)
-      ) {
-        moves.push(
-          createMove({
-            from: index,
-            to: parseSquare("g1"),
-            piece,
-            isCastle: true,
-            rookFrom: parseSquare("h1"),
-            rookTo: parseSquare("f1"),
-          }),
-        );
-      }
-      if (
-        state.castling.wQ &&
-        !state.board[parseSquare("d1")] &&
-        !state.board[parseSquare("c1")] &&
-        !state.board[parseSquare("b1")] &&
-        !isSquareAttacked(state, parseSquare("e1"), enemy) &&
-        !isSquareAttacked(state, parseSquare("d1"), enemy) &&
-        !isSquareAttacked(state, parseSquare("c1"), enemy)
-      ) {
-        moves.push(
-          createMove({
-            from: index,
-            to: parseSquare("c1"),
-            piece,
-            isCastle: true,
-            rookFrom: parseSquare("a1"),
-            rookTo: parseSquare("d1"),
-          }),
-        );
-      }
-    }
-
-    if (piece.color === "b" && rank === 0 && file === 4) {
-      if (
-        state.castling.bK &&
-        !state.board[parseSquare("f8")] &&
-        !state.board[parseSquare("g8")] &&
-        !isSquareAttacked(state, parseSquare("e8"), enemy) &&
-        !isSquareAttacked(state, parseSquare("f8"), enemy) &&
-        !isSquareAttacked(state, parseSquare("g8"), enemy)
-      ) {
-        moves.push(
-          createMove({
-            from: index,
-            to: parseSquare("g8"),
-            piece,
-            isCastle: true,
-            rookFrom: parseSquare("h8"),
-            rookTo: parseSquare("f8"),
-          }),
-        );
-      }
-      if (
-        state.castling.bQ &&
-        !state.board[parseSquare("d8")] &&
-        !state.board[parseSquare("c8")] &&
-        !state.board[parseSquare("b8")] &&
-        !isSquareAttacked(state, parseSquare("e8"), enemy) &&
-        !isSquareAttacked(state, parseSquare("d8"), enemy) &&
-        !isSquareAttacked(state, parseSquare("c8"), enemy)
-      ) {
-        moves.push(
-          createMove({
-            from: index,
-            to: parseSquare("c8"),
-            piece,
-            isCastle: true,
-            rookFrom: parseSquare("a8"),
-            rookTo: parseSquare("d8"),
-          }),
-        );
-      }
-    }
-
-    return moves;
-  }
-
-  const vectors = [];
-  if (piece.type === "b" || piece.type === "q") {
-    vectors.push(
-      [1, 1],
-      [1, -1],
-      [-1, 1],
-      [-1, -1],
-    );
-  }
-  if (piece.type === "r" || piece.type === "q") {
-    vectors.push(
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    );
-  }
-
-  for (const [dx, dy] of vectors) {
-    let nextFile = file + dx;
-    let nextRank = rank + dy;
-    while (isOnBoard(nextFile, nextRank)) {
-      const target = coordsToIndex(nextFile, nextRank);
-      const occupant = state.board[target];
-      if (!occupant) {
-        moves.push(createMove({ from: index, to: target, piece }));
-      } else {
-        if (occupant.color !== piece.color) {
-          moves.push(createMove({ from: index, to: target, piece, capture: occupant }));
-        }
-        break;
-      }
-      nextFile += dx;
-      nextRank += dy;
-    }
-  }
-
-  return moves;
-}
-
-function applyMove(state, move) {
-  const next = cloneState(state);
-  next.epSquare = null;
-
-  const movingPiece = { ...move.piece };
-  next.board[move.from] = null;
-
-  if (move.isEnPassant) {
-    next.board[move.capturedSquare] = null;
-  }
-
-  if (move.capture && !move.isEnPassant) {
-    next.board[move.to] = null;
-  }
-
-  if (move.promotion) {
-    movingPiece.type = move.promotion;
-  }
-
-  next.board[move.to] = movingPiece;
-
-  if (move.isCastle) {
-    const rook = next.board[move.rookFrom];
-    next.board[move.rookFrom] = null;
-    next.board[move.rookTo] = rook ? { ...rook } : null;
-  }
-
-  if (move.piece.type === "p" && Math.abs(move.to - move.from) === 16) {
-    next.epSquare = (move.from + move.to) / 2;
-  }
-
-  if (move.piece.type === "k") {
-    if (move.color === "w") {
-      next.castling.wK = false;
-      next.castling.wQ = false;
-    } else {
-      next.castling.bK = false;
-      next.castling.bQ = false;
-    }
-  }
-
-  if (move.piece.type === "r") {
-    disableRookCastlingRight(next, move.color, move.from);
-  }
-
-  if (move.capture && move.capture.type === "r") {
-    disableRookCastlingRight(next, oppositeColor(move.color), move.capturedSquare);
-  }
-
-  next.halfmove = move.piece.type === "p" || move.capture ? 0 : state.halfmove + 1;
-  next.fullmove = state.fullmove + (state.turn === "b" ? 1 : 0);
-  next.turn = oppositeColor(state.turn);
-  return next;
-}
-
-function disableRookCastlingRight(state, rookColor, square) {
-  if (rookColor === "w") {
-    if (square === parseSquare("a1")) {
-      state.castling.wQ = false;
-    }
-    if (square === parseSquare("h1")) {
-      state.castling.wK = false;
-    }
-    return;
-  }
-
-  if (square === parseSquare("a8")) {
-    state.castling.bQ = false;
-  }
-  if (square === parseSquare("h8")) {
-    state.castling.bK = false;
-  }
-}
-
-function findKing(state, color) {
-  for (let index = 0; index < 64; index += 1) {
-    const piece = state.board[index];
-    if (piece && piece.color === color && piece.type === "k") {
-      return index;
-    }
-  }
-  return null;
-}
-
-function isSquareAttacked(state, square, byColor) {
-  const { file, rank } = indexToCoords(square);
-
-  const pawnRank = byColor === "w" ? rank + 1 : rank - 1;
-  for (const pawnFile of [file - 1, file + 1]) {
-    if (!isOnBoard(pawnFile, pawnRank)) {
-      continue;
-    }
-    const pawn = state.board[coordsToIndex(pawnFile, pawnRank)];
-    if (pawn && pawn.color === byColor && pawn.type === "p") {
-      return true;
-    }
-  }
-
-  const knightOffsets = [
-    [1, 2],
-    [2, 1],
-    [2, -1],
-    [1, -2],
-    [-1, -2],
-    [-2, -1],
-    [-2, 1],
-    [-1, 2],
-  ];
-
-  for (const [dx, dy] of knightOffsets) {
-    const nextFile = file + dx;
-    const nextRank = rank + dy;
-    if (!isOnBoard(nextFile, nextRank)) {
-      continue;
-    }
-    const piece = state.board[coordsToIndex(nextFile, nextRank)];
-    if (piece && piece.color === byColor && piece.type === "n") {
-      return true;
-    }
-  }
-
-  const diagonalVectors = [
-    [1, 1],
-    [1, -1],
-    [-1, 1],
-    [-1, -1],
-  ];
-  for (const [dx, dy] of diagonalVectors) {
-    let nextFile = file + dx;
-    let nextRank = rank + dy;
-    while (isOnBoard(nextFile, nextRank)) {
-      const piece = state.board[coordsToIndex(nextFile, nextRank)];
-      if (piece) {
-        if (piece.color === byColor && (piece.type === "b" || piece.type === "q")) {
-          return true;
-        }
-        break;
-      }
-      nextFile += dx;
-      nextRank += dy;
-    }
-  }
-
-  const orthogonalVectors = [
-    [1, 0],
-    [-1, 0],
-    [0, 1],
-    [0, -1],
-  ];
-  for (const [dx, dy] of orthogonalVectors) {
-    let nextFile = file + dx;
-    let nextRank = rank + dy;
-    while (isOnBoard(nextFile, nextRank)) {
-      const piece = state.board[coordsToIndex(nextFile, nextRank)];
-      if (piece) {
-        if (piece.color === byColor && (piece.type === "r" || piece.type === "q")) {
-          return true;
-        }
-        break;
-      }
-      nextFile += dx;
-      nextRank += dy;
-    }
-  }
-
-  for (let dx = -1; dx <= 1; dx += 1) {
-    for (let dy = -1; dy <= 1; dy += 1) {
-      if (dx === 0 && dy === 0) {
-        continue;
-      }
-      const nextFile = file + dx;
-      const nextRank = rank + dy;
-      if (!isOnBoard(nextFile, nextRank)) {
-        continue;
-      }
-      const piece = state.board[coordsToIndex(nextFile, nextRank)];
-      if (piece && piece.color === byColor && piece.type === "k") {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-function isInCheck(state, color) {
-  const kingSquare = findKing(state, color);
-  if (kingSquare == null) {
-    return false;
-  }
-  return isSquareAttacked(state, kingSquare, oppositeColor(color));
-}
-
-function getGameResult(state) {
-  const legalMoves = generateLegalMoves(state);
-  if (legalMoves.length) {
-    return null;
-  }
-  if (isInCheck(state, state.turn)) {
-    const winner = oppositeColor(state.turn);
-    return {
-      type: "checkmate",
-      winner,
-      loser: state.turn,
-      score: winner === "w" ? "1-0" : "0-1",
-    };
-  }
-  return {
-    type: "stalemate",
-    winner: null,
-    loser: null,
-    score: "1/2-1/2",
-  };
-}
-
-function generateFen(state) {
-  const rows = [];
-  for (let rank = 0; rank < 8; rank += 1) {
-    let row = "";
-    let emptyCount = 0;
-    for (let file = 0; file < 8; file += 1) {
-      const piece = state.board[coordsToIndex(file, rank)];
-      if (!piece) {
-        emptyCount += 1;
-        continue;
-      }
-      if (emptyCount) {
-        row += String(emptyCount);
-        emptyCount = 0;
-      }
-      row += piece.color === "w" ? piece.type.toUpperCase() : piece.type;
-    }
-    if (emptyCount) {
-      row += String(emptyCount);
-    }
-    rows.push(row);
-  }
-
-  const castling = [
-    state.castling.wK ? "K" : "",
-    state.castling.wQ ? "Q" : "",
-    state.castling.bK ? "k" : "",
-    state.castling.bQ ? "q" : "",
-  ].join("") || "-";
-
-  return `${rows.join("/")} ${state.turn} ${castling} ${state.epSquare == null ? "-" : squareName(state.epSquare)} ${state.halfmove} ${state.fullmove}`;
-}
-
-function parseFen(fen) {
-  const parts = fen.trim().split(/\s+/);
-  if (parts.length < 4) {
-    throw new Error("FEN is incomplete.");
-  }
-
-  const [boardPart, turnPart, castlingPart, epPart, halfmovePart = "0", fullmovePart = "1"] = parts;
-  const rows = boardPart.split("/");
-  if (rows.length !== 8) {
-    throw new Error("FEN board has the wrong number of ranks.");
-  }
-
-  const board = Array(64).fill(null);
-  rows.forEach((row, rank) => {
-    let file = 0;
-    for (const symbol of row) {
-      if (/\d/.test(symbol)) {
-        file += Number(symbol);
-        continue;
-      }
-      const color = symbol === symbol.toUpperCase() ? "w" : "b";
-      const type = symbol.toLowerCase();
-      if (!"kqrbnp".includes(type) || file > 7) {
-        throw new Error("FEN contains an invalid piece placement.");
-      }
-      board[coordsToIndex(file, rank)] = { color, type };
-      file += 1;
-    }
-    if (file !== 8) {
-      throw new Error("FEN rank does not add up to eight files.");
-    }
-  });
-
-  const turn = turnPart === "w" || turnPart === "b" ? turnPart : null;
-  if (!turn) {
-    throw new Error("FEN turn field is invalid.");
-  }
-
-  const epSquare = epPart === "-" ? null : parseSquare(epPart);
-  if (epPart !== "-" && epSquare == null) {
-    throw new Error("FEN en passant square is invalid.");
-  }
-
-  return {
-    board,
-    turn,
-    castling: {
-      wK: castlingPart.includes("K"),
-      wQ: castlingPart.includes("Q"),
-      bK: castlingPart.includes("k"),
-      bQ: castlingPart.includes("q"),
-    },
-    epSquare,
-    halfmove: Number.parseInt(halfmovePart, 10) || 0,
-    fullmove: Number.parseInt(fullmovePart, 10) || 1,
-  };
-}
-
-function parsePgnHeaders(text) {
-  const headers = {};
-  const headerPattern = /^\s*\[([A-Za-z0-9_]+)\s+"((?:\\.|[^"\\])*)"\]\s*$/gm;
-  for (const match of text.matchAll(headerPattern)) {
-    headers[match[1]] = match[2].replace(/\\"/g, "\"");
-  }
-  return headers;
-}
-
-function normalizeSan(token) {
-  return token
-    .trim()
-    .replaceAll("0-0-0", "O-O-O")
-    .replaceAll("0-0", "O-O")
-    .replace(/\.\.\./g, "")
-    .replace(/[?!]+/g, "")
-    .replace(/[+#]+$/g, "")
-    .replace(/\s+/g, "")
-    .replace(/e\.p\.$/i, "");
-}
-
-function stripNestedParentheses(text) {
-  let result = text;
-  let previous = "";
-  while (result !== previous) {
-    previous = result;
-    result = result.replace(/\([^()]*\)/g, " ");
-  }
-  return result;
-}
-
-function tokenizePgnMoves(text) {
-  let movetext = text.replace(/\r/g, "\n");
-  movetext = movetext.replace(/^\s*\[[^\]]*\]\s*$/gm, " ");
-  movetext = movetext.replace(/\{[\s\S]*?\}/g, " ");
-  movetext = movetext.replace(/;[^\n]*/g, " ");
-  movetext = stripNestedParentheses(movetext);
-  movetext = movetext.replace(/\$\d+/g, " ");
-  movetext = movetext.replace(/\d+\.(?:\.\.)?/g, " ");
-  movetext = movetext.replace(/\b(?:1-0|0-1|1\/2-1\/2|\*)\b/g, " ");
-  return movetext
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter((token) => token && !/^e\.?p\.?$/i.test(token));
-}
-
-function matchSanMove(state, token) {
-  const normalizedToken = normalizeSan(token);
-  const legalMoves = generateLegalMoves(state);
-  const matches = legalMoves.filter((move) => normalizeSan(formatSanMove(state, move, legalMoves)) === normalizedToken);
-  if (matches.length === 1) {
-    return matches[0];
-  }
-  if (!matches.length) {
-    throw new Error(`Could not parse move "${token}".`);
-  }
-  throw new Error(`Move "${token}" is ambiguous in this position.`);
-}
-
-function extractPgnText(sourceText) {
-  const trimmed = sourceText.trim();
-  if (!trimmed) {
-    throw new Error("No game text was provided.");
-  }
-
-  if (/^\s*\[Event\s+/m.test(trimmed) || /^\s*\[[A-Za-z0-9_]+\s+"/m.test(trimmed)) {
-    return trimmed;
-  }
-
-  const embeddedPgnMatch = trimmed.match(/"pgn"\s*:\s*"((?:\\.|[^"\\])*)"/i);
-  if (embeddedPgnMatch) {
-    try {
-      return JSON.parse(`"${embeddedPgnMatch[1]}"`);
-    } catch {
-      // Fall through to other extraction heuristics.
-    }
-  }
-
-  const headerBlockMatch = trimmed.match(/((?:\s*\[[^\]]+\]\s*)+\s*(?:1\.|1\s*\.)[\s\S]+)/);
-  if (headerBlockMatch) {
-    return headerBlockMatch[1].trim();
-  }
-
-  if (/\b1\.(?:\.\.)?\s*/.test(trimmed) || /\b(?:O-O(?:-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)\b/.test(trimmed)) {
-    return trimmed;
-  }
-
-  throw new Error("Could not find a PGN inside the imported text.");
-}
-
-function parseImportedGame(sourceText) {
-  const pgn = extractPgnText(sourceText);
-  const headers = parsePgnHeaders(pgn);
-  const initialState = headers.SetUp === "1" && headers.FEN ? parseFen(headers.FEN) : createInitialState();
-  const moves = [];
-  let state = cloneState(initialState);
-
-  for (const token of tokenizePgnMoves(pgn)) {
-    const move = matchSanMove(state, token);
-    const legalMoves = generateLegalMoves(state);
-    moves.push({
-      move,
-      san: formatSanMove(state, move, legalMoves),
-    });
-    state = applyMove(state, move);
-  }
-
-  if (!moves.length) {
-    throw new Error("The imported game does not contain any playable moves.");
-  }
-
-  return { headers, initialState, moves, pgn };
 }
 
 function createNode(parentId, state, move = null) {
@@ -1591,21 +799,6 @@ function estimatePerformanceRating(playerSummary) {
   return Math.round(clampNumber(estimated, 100, 2900) / 10) * 10;
 }
 
-function whitePerspectiveScore(score, positionTurn) {
-  return scoreFromPlayerPerspective(score, positionTurn, "w");
-}
-
-function formatWhitePerspectiveNumeric(numeric) {
-  if (Math.abs(numeric) >= 90000) {
-    return numeric > 0 ? "Mate for White" : "Mate for Black";
-  }
-  const pawns = Math.abs(numeric / 100).toFixed(1);
-  if (Math.abs(numeric) < 35) {
-    return "Balanced";
-  }
-  return numeric > 0 ? `White edge +${pawns}` : `Black edge +${pawns}`;
-}
-
 function buildReviewSummaryData() {
   if (app.mode !== "review" || app.importedMainlineIds.length < 2) {
     return null;
@@ -1940,7 +1133,7 @@ function setCurrentNode(nodeId, options = {}) {
   }
 }
 
-function resetGame(playerColor) {
+function resetGame(playerColor, options = {}) {
   nodeCounter = 0;
   app.nodes = new Map();
   app.mode = "play";
@@ -1959,6 +1152,7 @@ function resetGame(playerColor) {
   app.awaitingEngineNodeId = null;
   cancelPendingEngineReply();
   app.engineRequestSerial += 1;
+  app.currentImportedGame = null;
 
   const root = createNode(null, createInitialState(), null);
   app.rootId = root.id;
@@ -1970,6 +1164,9 @@ function resetGame(playerColor) {
     app.engine.newGame();
   }
 
+  if (options.syncRoute !== false) {
+    syncRouteForImportedGame(null);
+  }
   setImportStatus("Paste PGN directly, or paste a Chess.com game link and import it here.");
   renderAll();
   ensureEngineWorkForCurrentNode();
@@ -2351,202 +1548,6 @@ async function requestEngineReplyForNode(nodeId, baseline = null, playedMove = n
   }
 }
 
-function buildMoveFeedback(
-  baseline,
-  responseAnalysis,
-  playedMove,
-  responseTurn,
-  preMoveState = null,
-  postMoveState = null,
-  perspectiveColor = app.playerColor,
-) {
-  const playedUci = moveToUci(playedMove);
-
-  if (!baseline || !baseline.score || !responseAnalysis.score) {
-    return {
-      tone: "good",
-      label: playedUci === baseline?.bestmove ? "Best" : "Played",
-      detail: "Evaluation unavailable",
-      loss: null,
-      bestUci: baseline?.bestmove ?? null,
-    };
-  }
-
-  const baselineValue = scoreFromPlayerPerspective(baseline.score, preMoveState?.turn ?? perspectiveColor, perspectiveColor);
-  const responseValue = scoreFromPlayerPerspective(responseAnalysis.score, responseTurn, perspectiveColor);
-  const loss = Math.max(0, Math.round(baselineValue - responseValue));
-  const playedBest = playedUci === baseline.bestmove;
-  const moveSwing = responseValue - baselineValue;
-  const sacrifice = Boolean(preMoveState && postMoveState && isBrilliantSacrifice(preMoveState, postMoveState, playedMove));
-
-  if (playedBest && sacrifice && responseValue > -80 && baselineValue < 600) {
-    return {
-      tone: "brilliant",
-      label: "Brilliant",
-      detail: "Best sacrifice found",
-      loss: 0,
-      bestUci: baseline.bestmove,
-    };
-  }
-
-  if (playedBest && isGreatMove(baselineValue, responseValue, moveSwing)) {
-    return {
-      tone: "great",
-      label: "Great Move",
-      detail: "Critical move found",
-      loss: 0,
-      bestUci: baseline.bestmove,
-    };
-  }
-
-  if (!playedBest && isMiss(baselineValue, responseValue)) {
-    return {
-      tone: "miss",
-      label: "Miss",
-      detail: `${loss} cp lost`,
-      loss,
-      bestUci: baseline.bestmove,
-    };
-  }
-
-  if (playedBest) {
-    return {
-      tone: "best",
-      label: "Best",
-      detail: "Matched Stockfish",
-      loss: 0,
-      bestUci: baseline.bestmove,
-    };
-  }
-
-  if (loss <= 25) {
-    return {
-      tone: "excellent",
-      label: "Excellent",
-      detail: `${loss} cp lost`,
-      loss,
-      bestUci: baseline.bestmove,
-    };
-  }
-
-  if (loss <= 80) {
-    return {
-      tone: "good",
-      label: "Good",
-      detail: `${loss} cp lost`,
-      loss,
-      bestUci: baseline.bestmove,
-    };
-  }
-
-  if (loss <= 160) {
-    return {
-      tone: "inaccuracy",
-      label: "Inaccuracy",
-      detail: `${loss} cp lost`,
-      loss,
-      bestUci: baseline.bestmove,
-    };
-  }
-
-  if (loss <= 300) {
-    return {
-      tone: "mistake",
-      label: "Mistake",
-      detail: `${loss} cp lost`,
-      loss,
-      bestUci: baseline.bestmove,
-    };
-  }
-
-  return {
-    tone: "blunder",
-    label: "Blunder",
-    detail: `${loss} cp lost`,
-    loss,
-    bestUci: baseline.bestmove,
-  };
-}
-
-function materialBalanceForColor(state, color) {
-  let total = 0;
-  for (const piece of state.board) {
-    if (!piece) {
-      continue;
-    }
-    const value = PIECE_VALUES[piece.type] ?? 0;
-    total += piece.color === color ? value : -value;
-  }
-  return total;
-}
-
-function isBrilliantSacrifice(preMoveState, postMoveState, playedMove) {
-  const movedPiece = postMoveState.board[playedMove.to];
-  if (!movedPiece || movedPiece.type === "p" || movedPiece.type === "k") {
-    return false;
-  }
-
-  const netBefore = materialBalanceForColor(preMoveState, playedMove.color);
-  const netAfter = materialBalanceForColor(postMoveState, playedMove.color);
-  const capturedValue = playedMove.capture ? PIECE_VALUES[playedMove.capture.type] ?? 0 : 0;
-  const movedValue = PIECE_VALUES[movedPiece.type] ?? 0;
-  const isHanging = isSquareAttacked(postMoveState, playedMove.to, oppositeColor(playedMove.color))
-    && !isSquareAttacked(postMoveState, playedMove.to, playedMove.color);
-
-  return isHanging && movedValue - capturedValue >= 2 && netAfter <= netBefore;
-}
-
-function isGreatMove(baselineValue, responseValue, moveSwing) {
-  return (
-    (baselineValue <= -180 && responseValue >= -40) ||
-    (baselineValue <= 20 && responseValue >= 180) ||
-    moveSwing >= 240
-  );
-}
-
-function isMiss(baselineValue, responseValue) {
-  return baselineValue >= 220 && responseValue <= 70;
-}
-
-function scoreToNumeric(score) {
-  if (!score) {
-    return 0;
-  }
-  if (score.kind === "mate") {
-    const distance = Math.min(Math.abs(score.value), 100);
-    return Math.sign(score.value) * (100000 - distance * 1000);
-  }
-  return score.value;
-}
-
-function scoreFromPlayerPerspective(score, positionTurn, playerColor) {
-  const raw = scoreToNumeric(score);
-  return positionTurn === playerColor ? raw : -raw;
-}
-
-function formatScore(score, positionTurn) {
-  if (!score) {
-    return "--";
-  }
-  const multiplier = positionTurn === app.playerColor ? 1 : -1;
-  if (score.kind === "mate") {
-    const pov = score.value * multiplier;
-    return pov > 0 ? `M${pov}` : `-M${Math.abs(pov)}`;
-  }
-  const cp = score.value * multiplier;
-  const pawns = (cp / 100).toFixed(1);
-  return `${cp >= 0 ? "+" : ""}${pawns}`;
-}
-
-function evalFillPercent(score, positionTurn) {
-  if (!score) {
-    return 50;
-  }
-  const numeric = scoreFromPlayerPerspective(score, positionTurn, "w");
-  const percent = 1 / (1 + Math.exp(-numeric / 220));
-  return Math.max(0, Math.min(100, percent * 100));
-}
-
 function canPlayerMove(node) {
   return Boolean(activeInputColor(node));
 }
@@ -2800,6 +1801,8 @@ function renderAll() {
   renderBranchList();
   renderStatus();
   renderDragLayer();
+  renderImportPermalink();
+  renderImportHistory();
 }
 
 function renderBoard() {
@@ -2863,7 +1866,11 @@ function renderStatus() {
   const queuedReply = app.pendingEngineReply?.nodeId === node.id ? app.pendingEngineReply : null;
 
   elements.fenOutput.textContent = generateFen(node.state);
-  elements.scoreValue.textContent = result ? resultScoreline(result) : analysis ? formatScore(analysis.score, node.state.turn) : "--";
+  elements.scoreValue.textContent = result
+    ? resultScoreline(result)
+    : analysis
+      ? formatScore(analysis.score, node.state.turn, app.playerColor)
+      : "--";
   elements.evalBarFill.style.height = `${result ? resultEvalFillPercent(result) : evalFillPercent(analysis?.score, node.state.turn)}%`;
 
   const suggestion = result
@@ -2965,7 +1972,7 @@ function renderMoveTree() {
     const meta = [
       role,
       node.feedback?.detail,
-      node.analysis?.score ? `Eval ${formatScore(node.analysis.score, node.state.turn)}` : "",
+      node.analysis?.score ? `Eval ${formatScore(node.analysis.score, node.state.turn, app.playerColor)}` : "",
     ].filter(Boolean);
 
     return `
@@ -3032,7 +2039,8 @@ function renderBranchList() {
       : node.feedbackPending
         ? buildFeedbackBadgeMarkup(null, { pending: true })
         : "";
-    const extra = node.feedback?.detail ?? (node.analysis?.score ? `Eval ${formatScore(node.analysis.score, node.state.turn)}` : "No cached eval");
+    const extra = node.feedback?.detail
+      ?? (node.analysis?.score ? `Eval ${formatScore(node.analysis.score, node.state.turn, app.playerColor)}` : "No cached eval");
 
     return `
       <button type="button" class="branch-card" data-node-id="${node.id}">
@@ -3247,23 +2255,106 @@ function setImportBusy(busy) {
   }
 }
 
-async function fetchImportedTextFromUrl(url) {
-  const response = await fetch(`/api/import-game?url=${encodeURIComponent(url)}`);
-  let payload = null;
-  try {
-    payload = await response.json();
-  } catch {
-    // Leave payload null and use the HTTP status below.
-  }
-
-  if (!response.ok || !payload?.ok) {
-    throw new Error(payload?.error || `Import failed with HTTP ${response.status}.`);
-  }
-
-  return payload.text;
+function importStoredGameRecord(gameRecord, options = {}) {
+  const refreshedRecord = options.touch === false ? gameRecord : app.gameCache.save(gameRecord);
+  refreshImportHistory();
+  const parsed = parseImportedGame(refreshedRecord.pgn);
+  importParsedGame(parsed, {
+    storedGame: refreshedRecord,
+    viewerColor: refreshedRecord.viewerColor ?? null,
+    syncRoute: options.syncRoute !== false,
+  });
 }
 
-function importParsedGame(record) {
+function loadCachedGameFromRoute() {
+  const route = parseGameRoute(window.location.pathname);
+  if (!route) {
+    return false;
+  }
+
+  const cachedRecord = route.source && route.sourceGameId
+    ? app.gameCache.findBySourceGameId(route.source, route.sourceGameId)
+    : app.gameCache.findByPgnHash(route.pgnHash);
+
+  if (!cachedRecord) {
+    setImportStatus(
+      "That local review link is not cached in this browser yet. Import the game once to create it here.",
+      "error",
+    );
+    return false;
+  }
+
+  importStoredGameRecord(cachedRecord, { syncRoute: false });
+  updateReviewWarmupStatus("loading");
+  return true;
+}
+
+async function loadImportedRecordFromRoute() {
+  const route = parseImportTokenRoute(window.location.pathname);
+  if (!route?.token) {
+    return false;
+  }
+
+  console.info("Loading extension import route", { token: route.token });
+  setImportBusy(true);
+  setImportStatus("Receiving game from extension...", "loading");
+
+  try {
+    const payload = await fetchImportedRecordFromToken(route.token);
+    console.info("Fetched extension import payload", {
+      sourceGameId: payload?.sourceGameId,
+      hasPgn: Boolean(payload?.pgn),
+      extraction: payload?.extraction,
+    });
+    const parsedRecord = parseImportedGame(importSourceTextFromPayload(payload));
+    const importedGameRecord = buildNormalizedGameRecord(parsedRecord, {
+      source: payload.source ?? null,
+      sourceGameId: payload.sourceGameId ?? null,
+      sourceUrl: payload.sourceUrl ?? null,
+      viewerUsername: payload.viewerUsername ?? null,
+    });
+    importParsedGame(parsedRecord, {
+      storedGame: importedGameRecord,
+      viewerColor: importedGameRecord.viewerColor ?? null,
+      syncRoute: false,
+    });
+    if (app.mode !== "review" || app.importedMainlineIds.length < 2) {
+      throw new Error("Imported game did not enter review mode.");
+    }
+    let cachedRecord = null;
+    try {
+      cachedRecord = finalizeImportedGameCache(importedGameRecord);
+    } catch (cacheError) {
+      console.warn("Imported game loaded, but local cache finalization failed.", cacheError);
+    }
+    console.info("Extension import loaded into review mode", {
+      sourceGameId: cachedRecord?.sourceGameId ?? payload?.sourceGameId ?? null,
+      white: cachedRecord?.whiteUsername ?? parsedRecord.headers.White ?? null,
+      black: cachedRecord?.blackUsername ?? parsedRecord.headers.Black ?? null,
+      moves: app.importedMainlineIds.length - 1,
+    });
+    setImportStatus(
+      `Imported ${importRecordTitle(cachedRecord ?? { headers: parsedRecord.headers })} from extension.`,
+      "success",
+    );
+    updateReviewWarmupStatus("loading");
+    return true;
+  } catch (error) {
+    console.error("Could not load extension import.", error);
+    if (elements.engineStatus) {
+      elements.engineStatus.textContent = `Import failed: ${error.message}`;
+    }
+    if (elements.statusText) {
+      elements.statusText.textContent = `Extension import failed: ${error.message}`;
+    }
+    setImportStatus(error.message || "Could not load the extension import.", "error");
+    return false;
+  } finally {
+    setImportBusy(false);
+  }
+}
+
+function importParsedGame(record, options = {}) {
   nodeCounter = 0;
   app.nodes = new Map();
   app.mode = "review";
@@ -3277,7 +2368,21 @@ function importParsedGame(record) {
   app.gameHeaders = record.headers;
   app.importedResult = parseImportedResult(record.headers);
   app.importedResultNodeId = null;
+  app.currentImportedGame = options.storedGame ?? null;
   clearDragState();
+
+  const viewerColor = options.viewerColor === "w" || options.viewerColor === "b"
+    ? options.viewerColor
+    : (options.storedGame?.viewerColor === "w" || options.storedGame?.viewerColor === "b"
+      ? options.storedGame.viewerColor
+      : null);
+  if (viewerColor) {
+    app.playerColor = viewerColor;
+  }
+  app.orientation = viewerColor ?? app.playerColor;
+  if (elements.playerColor) {
+    elements.playerColor.value = app.playerColor;
+  }
 
   if (app.engineReady && app.engine) {
     app.engine.cancelPendingJobs("superseded");
@@ -3302,6 +2407,9 @@ function importParsedGame(record) {
   app.importedResultNodeId = cursor.id;
   app.currentNodeId = cursor.id;
   app.latestNodeId = cursor.id;
+  if (options.syncRoute !== false) {
+    syncRouteForImportedGame(app.currentImportedGame);
+  }
   renderAll();
   startReviewWarmup({ immediateNodeId: cursor.id, resetData: true });
 }
@@ -3322,9 +2430,28 @@ async function importGameForReview() {
   setImportStatus("Loading game for review...", "loading");
 
   try {
+    const directRef = !pastedText ? extractChessComGameRef(importUrl) : null;
+    if (directRef?.sourceGameId) {
+      const cachedBySource = app.gameCache.findBySourceGameId(directRef.source, directRef.sourceGameId);
+      if (cachedBySource) {
+        importStoredGameRecord(cachedBySource);
+        updateReviewWarmupStatus("loading");
+        return;
+      }
+    }
+
     const importedText = pastedText || await fetchImportedTextFromUrl(importUrl);
-    const record = parseImportedGame(importedText);
-    importParsedGame(record);
+    const parsedRecord = parseImportedGame(importedText);
+    importParsedGame(parsedRecord, { syncRoute: false });
+    try {
+      finalizeImportedGameCache(parsedRecord, {
+        source: directRef?.source ?? null,
+        sourceGameId: directRef?.sourceGameId ?? null,
+        sourceUrl: directRef?.sourceUrl ?? (importUrl || null),
+      });
+    } catch (cacheError) {
+      console.warn("Imported game loaded, but local cache finalization failed.", cacheError);
+    }
     updateReviewWarmupStatus("loading");
   } catch (error) {
     setImportStatus(error.message || "Could not import that game.", "error");
@@ -3377,6 +2504,22 @@ function bindEvents() {
       return;
     }
     setCurrentNode(button.dataset.nodeId);
+  });
+
+  elements.importHistory?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-cache-key]");
+    if (!button) {
+      return;
+    }
+    const cachedRecord = findCachedRecordByKey(button.dataset.cacheKey);
+    if (!cachedRecord) {
+      setImportStatus("That cached review is no longer available.", "error");
+      refreshImportHistory();
+      renderAll();
+      return;
+    }
+    importStoredGameRecord(cachedRecord);
+    updateReviewWarmupStatus("loading");
   });
 
   elements.promotionOptions.addEventListener("click", (event) => {
@@ -3492,7 +2635,11 @@ async function initEngine() {
     await app.engine.init();
     app.engineReady = true;
     elements.engineStatus.textContent = "Stockfish ready";
-    ensureEngineWorkForCurrentNode(true);
+    if (app.mode === "review" && app.importedMainlineIds.length) {
+      startReviewWarmup({ immediateNodeId: app.currentNodeId, resetData: true });
+    } else {
+      ensureEngineWorkForCurrentNode(true);
+    }
   } catch (error) {
     app.engineReady = false;
     console.error(error);
@@ -3501,15 +2648,35 @@ async function initEngine() {
   }
 }
 
-function bootstrap() {
+async function bootstrap() {
   bindEvents();
   elements.playerColor.value = app.playerColor;
   elements.depthValue.textContent = String(app.depth);
   elements.replyDelayValue.textContent = formatDelayMs(app.engineReplyDelayMs);
   elements.showBestArrow.checked = app.showBestArrow;
   renderMoveKey();
-  resetGame(app.playerColor);
-  initEngine();
+  refreshImportHistory();
+  resetGame(app.playerColor, { syncRoute: false });
+  const loadedFromImportRoute = await loadImportedRecordFromRoute();
+  if (!loadedFromImportRoute) {
+    loadCachedGameFromRoute();
+  }
+  await initEngine();
 }
 
-bootstrap();
+bootstrap().catch((error) => {
+  console.error(error);
+  elements.engineStatus.textContent = `Startup failed: ${error.message}`;
+  renderAll();
+});
+
+window.addEventListener("error", (event) => {
+  const message = event.error?.message || event.message || "Unknown startup error.";
+  console.error("Window error", event.error || event.message || event);
+  if (elements.engineStatus) {
+    elements.engineStatus.textContent = `Runtime error: ${message}`;
+  }
+  if (elements.statusText) {
+    elements.statusText.textContent = `Runtime error: ${message}`;
+  }
+});

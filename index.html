@@ -3,18 +3,46 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Chess Trainer</title>
-    <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css">
+    <meta
+      name="description"
+      content="Browser-first local chess trainer with Stockfish analysis, move branching, and PGN review."
+    >
+    <title>Chess Trainer | Local Stockfish Review Board</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
     <div class="app-shell">
       <header class="hero">
-        <div>
+        <div class="hero-copy">
           <p class="eyebrow">Local Chess Trainer</p>
-          <h1>Chess Trainer</h1>
+          <h1>Review like a serious chess desk.</h1>
+          <p class="hero-lede">
+            Import a finished Chess.com game, branch critical moments, and keep every line local with Stockfish in the browser.
+          </p>
+          <div class="hero-tags" aria-label="Product features">
+            <span class="hero-tag">Local Stockfish</span>
+            <span class="hero-tag">Variation tree</span>
+            <span class="hero-tag">Chess.com import</span>
+          </div>
         </div>
-        <div class="hero-status" id="engine-status">Loading Stockfish...</div>
+        <div class="hero-side">
+          <div class="hero-status" id="engine-status">Loading Stockfish...</div>
+          <div class="hero-mini-grid" aria-hidden="true">
+            <article class="hero-mini-card">
+              <span>Flow</span>
+              <strong>Click icon, study here</strong>
+            </article>
+            <article class="hero-mini-card">
+              <span>Board</span>
+              <strong>Play + review</strong>
+            </article>
+            <article class="hero-mini-card">
+              <span>Storage</span>
+              <strong>Local cache</strong>
+            </article>
+          </div>
+        </div>
       </header>
 
       <main class="layout">
@@ -75,8 +103,8 @@
 
             <label class="depth-control">
               Coach depth
-              <input type="range" id="depth-input" min="8" max="16" value="11">
-              <span id="depth-value">11</span>
+              <input type="range" id="depth-input" min="8" max="16" value="16">
+              <span id="depth-value">16</span>
             </label>
 
             <label class="delay-control">
@@ -125,14 +153,22 @@
           </section>
 
           <section class="panel note-panel">
-            <h2>How to use it</h2>
+            <h2>Desk notes</h2>
             <p>Click or drag a piece to a highlighted square. Rewind with the arrows, then play a different move to create a branch.</p>
             <p>Import a PGN or a Chess.com game link below to switch into review mode.</p>
           </section>
 
           <section class="panel note-panel">
-            <h2>Move key</h2>
+            <h2>Move grades</h2>
             <div class="move-key" id="move-key"></div>
+          </section>
+
+          <section class="panel import-history-panel">
+            <div class="panel-header">
+              <h2>Recent reviews</h2>
+              <span>Local cache</span>
+            </div>
+            <div class="import-history" id="import-history"></div>
           </section>
 
           <section class="panel import-panel">
@@ -166,6 +202,11 @@
               <button type="button" id="import-game-btn">Import for review</button>
             </div>
 
+            <div class="import-permalink-card">
+              <span>Cached permalink</span>
+              <code id="import-permalink">Import a game to create a reopenable local link in this browser.</code>
+            </div>
+
             <p class="import-status" id="import-status">Paste PGN directly, or paste a Chess.com game link and import it here.</p>
           </section>
         </aside>
@@ -179,6 +220,6 @@
       </div>
     </div>
 
-    <script type="module" src="app.js"></script>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>
